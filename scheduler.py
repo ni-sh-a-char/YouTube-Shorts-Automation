@@ -22,6 +22,7 @@ Usage:
 
 import os
 import logging
+import shutil
 from datetime import datetime
 from typing import Optional
 from pathlib import Path
@@ -35,6 +36,31 @@ logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
+
+
+def cleanup_output_folder(output_dir: str = 'output/shorts'):
+    """
+    Delete the output folder and all its contents after successful upload.
+    
+    Args:
+        output_dir (str): Path to the output folder to delete (default: 'output/shorts')
+    
+    Returns:
+        bool: True if cleanup was successful, False otherwise
+    """
+    try:
+        output_path = Path(output_dir)
+        if output_path.exists():
+            logger.info(f"🗑️  Cleaning up output folder: {output_path}")
+            shutil.rmtree(output_path)
+            logger.info(f"✅ Output folder deleted successfully")
+            return True
+        else:
+            logger.warning(f"⚠️  Output folder not found: {output_path}")
+            return True
+    except Exception as e:
+        logger.error(f"❌ Failed to cleanup output folder: {e}")
+        return False
 
 
 def generate_shorts_video():
@@ -185,6 +211,10 @@ def generate_shorts_video():
         )
         logger.info(f"✅ Video uploaded! ID: {video_id}")
         logger.info(f"🎉 View at: https://youtube.com/shorts/{video_id}")
+        
+        # Step 8: Cleanup output folder after successful upload
+        logger.info("\n[8/8] Cleaning up temporary files...")
+        cleanup_output_folder('output/shorts')
         
         # Log success
         logger.info("\n" + "=" * 80)

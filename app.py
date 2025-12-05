@@ -39,6 +39,9 @@ from keep_alive import app
 # Import scheduler
 from scheduler import start_scheduler, stop_scheduler
 
+# Import startup verifier
+from scripts.startup_verifier import run_startup_verification_if_enabled
+
 # Global scheduler reference
 scheduler = None
 
@@ -87,6 +90,15 @@ def initialize_app():
         logger.info(f"⏰ Scheduler running: daily at {schedule_hour:02d}:00 ({timezone_str})")
     else:
         logger.info(f"⏰ Scheduler running: videos every {interval_hours} hours")
+    logger.info("=" * 80)
+
+    # Run startup verification if enabled
+    logger.info("\n" + "=" * 80)
+    startup_result = run_startup_verification_if_enabled()
+    if startup_result:
+        logger.info(f"📊 Verification result: {startup_result.get('status').upper()}")
+        if startup_result.get('message'):
+            logger.info(f"   Message: {startup_result.get('message')}")
     logger.info("=" * 80)
 
 

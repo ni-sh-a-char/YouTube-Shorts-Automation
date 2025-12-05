@@ -27,29 +27,61 @@ def get_authenticated_service():
         print("INFO: Found existing credentials file.")
         credentials = Credentials.from_authorized_user_file(str(CREDENTIALS_FILE), YOUTUBE_UPLOAD_SCOPE)
 
-    # If we don't have valid credentials, start the authentication flow
+    # If we don't have valid credentials, try several strategies.
     if not credentials or not credentials.valid:
-        # If credentials exist but are expired, try to refresh them automatically.
-        # This is what your GitHub Action will do on every run.
+        # 1) If credentials exist but are expired, try to refresh them automatically.
         if credentials and credentials.expired and credentials.refresh_token:
             print("INFO: Refreshing expired credentials...")
             credentials.refresh(Request())
+
         else:
-            # This is the part that runs on your local computer the very first time.
-            print("INFO: No valid credentials found. Starting new authentication flow...")
-            if not CLIENT_SECRETS_FILE.exists():
-                raise FileNotFoundError(f"CRITICAL ERROR: {CLIENT_SECRETS_FILE} not found. Please download it from Google Cloud Console.")
-            
-            flow = InstalledAppFlow.from_client_secrets_file(str(CLIENT_SECRETS_FILE), scopes=YOUTUBE_UPLOAD_SCOPE)
-            
-            # This command will start a local server, open your browser,
-            # and wait for you to grant permission.
-            credentials = flow.run_local_server(port=0)
-        
-        # Save the new, fresh credentials for all future runs
-        with open(CREDENTIALS_FILE, 'w') as f:
-            f.write(credentials.to_json())
-        print(f"INFO: Credentials saved to {CREDENTIALS_FILE}")
+            # 2) If credentials.json is not present but a refresh token + client id/secret
+            #    are provided via environment variables, construct credentials from the
+            #    refresh token and refresh to obtain an access token. This avoids the
+            #    need to run an interactive browser flow on headless hosts like Render.
+            refresh_token = os.getenv('YOUTUBE_REFRESH_TOKEN')
+            env_client_id = os.getenv('YOUTUBE_CLIENT_ID')
+            env_client_secret = os.getenv('YOUTUBE_CLIENT_SECRET')
+            token_uri = 'https://oauth2.googleapis.com/token'
+
+            if refresh_token and env_client_id and env_client_secret:
+                try:
+                    print("INFO: Creating credentials from environment refresh token...")
+                    credentials = Credentials(
+                        token=None,
+                        refresh_token=refresh_token,
+                        token_uri=token_uri,
+                        client_id=env_client_id,
+                        client_secret=env_client_secret,
+                        scopes=YOUTUBE_UPLOAD_SCOPE
+                    )
+                    # Refresh to obtain a valid access token
+                    credentials.refresh(Request())
+                    print("INFO: Successfully refreshed credentials from env refresh token")
+                except Exception as e:
+                    print(f"WARN: Failed to refresh credentials from environment: {e}")
+                    credentials = None
+
+            # 3) Fallback to interactive installed app flow (local dev only)
+            if (not credentials or not credentials.valid) and not CREDENTIALS_FILE.exists():
+                print("INFO: No valid credentials found. Starting new authentication flow...")
+                if not CLIENT_SECRETS_FILE.exists():
+                    raise FileNotFoundError(f"CRITICAL ERROR: {CLIENT_SECRETS_FILE} not found. Please download it from Google Cloud Console.")
+
+                flow = InstalledAppFlow.from_client_secrets_file(str(CLIENT_SECRETS_FILE), scopes=YOUTUBE_UPLOAD_SCOPE)
+                # This command will start a local server, open your browser,
+                # and wait for you to grant permission.
+                credentials = flow.run_local_server(port=0)
+
+        # If we obtained credentials, optionally save them for future runs
+        if credentials and credentials.valid:
+            try:
+                with open(CREDENTIALS_FILE, 'w') as f:
+                    f.write(credentials.to_json())
+                print(f"INFO: Credentials saved to {CREDENTIALS_FILE}")
+            except Exception:
+                # If filesystem is read-only on platform, skip saving silently
+                print("WARN: Could not save credentials to disk; proceeding with in-memory credentials")
             
     return build('youtube', 'v3', credentials=credentials)
 
