@@ -1,0 +1,284 @@
+# ============================================================================
+# YouTube Shorts Automation - Configuration File
+# ============================================================================
+# This file contains all configurable settings for the Shorts generator.
+# Environment variables (.env) override these settings.
+# ============================================================================
+
+# ============================================================================
+# API Configuration
+# ============================================================================
+api:
+  gemini:
+    model: "gemini-1.5-flash"          # Gemini model to use
+    temperature: 0.7                   # Creativity level (0.0 - 1.0)
+    max_output_tokens: 2000            # Max response length
+    timeout_seconds: 30                # API timeout
+    
+  youtube:
+    version: "v3"                      # YouTube API version
+    category_id: "28"                  # 28 = Science & Technology, 27 = Education
+    privacy_status: "public"           # public, unlisted, private
+    schedule_upload: false             # Schedule upload instead of immediate
+    scheduled_time: null               # ISO 8601 format (e.g., "2024-12-05T07:00:00Z")
+    self_declared_made_for_kids: false # COPPA compliance
+
+# ============================================================================
+# Video Settings
+# ============================================================================
+video:
+  resolution:
+    width: 1080                        # Vertical Shorts: 1080px
+    height: 1920                       # Vertical Shorts: 1920px
+  fps: 24                              # Frames per second
+  codec: "libx264"                     # Video codec (libx264, libx265)
+  audio_codec: "aac"                   # Audio codec
+  audio_bitrate: "192k"                # Audio bitrate
+  preset: "medium"                     # Encoding preset (ultrafast, superfast, veryfast, faster, fast, medium, slow)
+  threads: 4                           # CPU threads for encoding
+  duration_seconds: 30                 # Target video duration (30-60 for better engagement)
+  min_duration: 30                     # Minimum video duration (enforced)
+  max_duration: 60                     # Maximum video duration
+  background_music:
+    enabled: true                      # Add background music
+    volume_level: 0.15                 # Background music volume (0.0 - 1.0)
+    loop: true                         # Loop music if shorter than video
+
+# ============================================================================
+# Text-to-Speech (TTS) Configuration
+# ============================================================================
+tts:
+  provider: "gtts"                     # gtts or ttsmaker
+  language: "en"                       # Language code
+  speed: "normal"                      # normal, slow, fast
+  accent: "en-US"                      # Accent/dialect
+  timeout_seconds: 60                  # TTS generation timeout
+  format: "mp3"                        # Output format (mp3 or wav)
+  sample_rate: 16000                   # Audio sample rate (Hz)
+  bit_depth: 16                        # Bit depth (bits)
+
+# ============================================================================
+# Caption & Subtitle Configuration
+# ============================================================================
+captions:
+  enabled: true                        # Enable caption generation
+  format: "srt"                        # Format: srt, vtt, ass
+  embed_on_video: true                 # Embed captions directly on frames
+  font:
+    name: "Arial"                      # Font name
+    size: 40                           # Font size (pixels)
+    color: "#FFFFFF"                   # Text color (hex)
+    bold: true                         # Bold text
+    stroke_width: 2                    # Text stroke/outline width
+    stroke_color: "#000000"            # Stroke color
+  background:
+    enabled: true                      # Show background box behind text
+    color: "#000000"                   # Background color
+    alpha: 0.5                         # Transparency (0.0 - 1.0)
+  line_spacing: 1.2                    # Line spacing multiplier
+  position: "bottom"                   # Caption position: top, middle, bottom
+  margin:
+    x: 20                              # X margin (pixels)
+    y: 20                              # Y margin (pixels)
+
+# ============================================================================
+# Content Generation Settings
+# ============================================================================
+content:
+  niche: "tech/coding"                 # Content niche
+  target_topics:                       # Topics to cycle through
+    - "Python"
+    - "VS Code"
+    - "Git Commands"
+    - "Linux Terminal"
+    - "Regex Tips"
+    - "Docker"
+    - "AWS"
+    - "JavaScript"
+    - "Node.js"
+    - "DevOps Tools"
+  
+  ideas_per_topic: 5                   # Generate N ideas per topic
+  
+  script:
+    min_words: 50                      # Minimum script length
+    max_words: 150                     # Maximum script length
+    tone: "casual"                     # tone: casual, professional, technical, humorous
+    
+  idea:
+    duration_seconds: 15               # Target duration for idea generation
+    include_hook: true                 # Include hook in ideas
+    include_cta: true                  # Include call-to-action
+    
+  keywords:
+    auto_extract: true                 # Auto-extract keywords from script
+    min_keywords: 3                    # Minimum keywords to extract
+    max_keywords: 7                    # Maximum keywords to extract
+
+# ============================================================================
+# Automation & Scheduling
+# ============================================================================
+automation:
+  batch_size: 1                        # Generate N shorts per run
+  
+  scheduling:
+    enabled: false                     # Enable scheduled runs
+    type: "cron"                       # Type: cron, interval
+    cron_expression: "0 7 * * *"       # Daily at 7 AM UTC
+    timezone: "UTC"                    # Timezone for scheduling
+    
+  retry:
+    enabled: true                      # Retry on failure
+    max_attempts: 3                    # Maximum retry attempts
+    backoff_seconds: 10                # Backoff time between retries
+    
+  cleanup:
+    enabled: true                      # Auto-cleanup temp files
+    keep_temp_hours: 24                # Keep temp files for N hours (for debugging)
+    
+  dry_run: false                       # Simulate without uploading
+  verbose: false                       # Verbose logging
+
+# ============================================================================
+# Paths & Directories
+# ============================================================================
+paths:
+  output_dir: "./data/output"          # Final videos, thumbnails, metadata
+  temp_dir: "./data/temp"              # Intermediate files
+  log_dir: "./logs"                    # Log files
+  stock_footage_dir: "./data/stock_footage"  # Local stock videos
+  
+  # These are auto-created under output_dir
+  subdirectories:
+    videos: "videos"                   # Final video files
+    thumbnails: "thumbnails"           # Thumbnail images
+    captions: "captions"               # SRT/VTT caption files
+    metadata: "metadata"               # JSON metadata files
+    audio: "audio"                     # Audio files (mp3, wav)
+
+# ============================================================================
+# Logging Configuration
+# ============================================================================
+logging:
+  level: "INFO"                        # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  console_output: true                 # Log to console
+  file_output: true                    # Log to file
+  file_name: "shorts_generator.log"    # Log filename
+  
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"  # Log format
+  
+  file:
+    max_size_mb: 10                    # Max log file size before rotation
+    backup_count: 5                    # Number of backup files to keep
+  
+  colorize: true                       # Colorize console output
+
+# ============================================================================
+# Stock Footage Settings
+# ============================================================================
+stock_footage:
+  enabled: true                        # Use stock footage
+  provider: "pexels"                   # pexels, pixabay, or local
+  search_query_template: "coding {topic} tech" # Search template
+  
+  # For local footage
+  local:
+    directory: "./data/stock_footage"
+    extensions: [".mp4", ".mkv", ".mov"]
+    
+  # For API-based sources
+  api:
+    timeout_seconds: 30
+    retry_attempts: 3
+    
+  video:
+    min_duration: 10                   # Minimum video clip duration
+    max_duration: 120                  # Maximum video clip duration
+    preload: true                      # Pre-cache videos
+    cache_dir: "./data/stock_footage/cache"
+
+# ============================================================================
+# Thumbnail Generation
+# ============================================================================
+thumbnail:
+  enabled: true                        # Generate thumbnails
+  resolution:
+    width: 1080                        # Thumbnail width
+    height: 1920                       # Thumbnail height
+  
+  background:
+    source: "pexels"                   # pexels, solid, gradient
+    color: "#1a1a2e"                   # Fallback color (hex)
+    blur: 5                            # Blur radius (for image backgrounds)
+    
+  text:
+    title:
+      enabled: true
+      font_size: 80
+      font_color: "#FFFFFF"
+      font_bold: true
+      max_characters: 50               # Truncate title if longer
+    
+    tag:
+      enabled: true
+      font_size: 40
+      font_color: "#FFD700"            # Gold color
+      position: "bottom"               # top, middle, bottom
+      
+  emoji:
+    enabled: false                     # Add emoji overlays
+    size: 100                          # Emoji size (pixels)
+    count: 1                           # Number of emojis
+
+# ============================================================================
+# Database Configuration (Optional)
+# ============================================================================
+database:
+  enabled: false                       # Enable metadata database
+  type: "sqlite"                       # sqlite or postgres
+  
+  sqlite:
+    path: "./data/metadata.db"         # SQLite database path
+    
+  postgres:
+    host: "localhost"
+    port: 5432
+    database: "shorts_automation"
+    user: "postgres"
+    password: null                     # Set via environment variable
+
+# ============================================================================
+# YouTube Upload Settings
+# ============================================================================
+youtube:
+  auto_tag_shorts: true                # Add #Shorts to title/description
+  
+  title:
+    template: "{hook} #Shorts"         # Title template
+    max_length: 100                    # YouTube max title length
+    
+  description:
+    template: |
+      {script}
+      
+      🔗 Full tutorials and more at:
+      {channel_url}
+      
+      {hashtags}
+      
+      #Shorts #CodingTips #{topic}
+    max_length: 5000                   # YouTube max description length
+    
+  tags:
+    auto_generate: true                # Auto-generate tags from keywords
+    max_tags: 30                       # Maximum number of tags
+    default_tags:
+      - "Shorts"
+      - "CodingTips"
+      - "Programming"
+      - "Tech"
+      - "Tutorial"
+
+# ============================================================================
+# END OF CONFIGURATION
+# ============================================================================

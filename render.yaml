@@ -1,0 +1,53 @@
+services:
+  - type: web
+    name: youtube-shorts-automation
+    
+    # Choose runtime based on your deployment:
+    # Option 1: Native Python (faster for Render)
+    runtime: python312
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    
+    # Option 2: Docker (uncomment below to use Docker instead)
+    # dockerfile: Dockerfile
+    # dockerCommand: ""  # Uses CMD from Dockerfile
+    
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12
+      - key: PORT
+        value: 8080
+      - key: UPLOAD_SCHEDULE_HOURS
+        value: 12
+      - key: TARGET_TOPIC
+        value: python
+      - key: WORKERS
+        value: 1
+      - key: WORKER_TIMEOUT
+        value: 120
+    
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
+    
+    healthCheckPath: /
+    healthCheckInterval: 300
+    healthCheckTimeout: 10
+    
+    # Environment variables (set these in Render dashboard)
+    # DO NOT commit secrets to repository
+    envVarFile: .env
+
+# Deploy settings
+deploy:
+  fromRepo: true           # Deploy from GitHub repo
+  branch: main             # Main branch
+  autoDeployOnPush: true   # Auto-deploy on push
+
+# Cron jobs (optional - for manual triggers via cron)
+# Note: APScheduler handles scheduling, these are optional backups
+cronjobs:
+  - name: generate-shorts-backup
+    schedule: "0 */12 * * *"  # Every 12 hours (UTC)
+    command: "python scheduler.py"

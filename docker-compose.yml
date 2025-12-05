@@ -1,0 +1,43 @@
+version: '3.9'
+
+services:
+  youtube-shorts:
+    build: .
+    container_name: youtube-shorts-automation
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - PYTHONUNBUFFERED=1
+      - UPLOAD_SCHEDULE_HOURS=12
+      # Add your API keys here or use .env file
+      # - GEMINI_API_KEY=your_key_here
+      # - YOUTUBE_CLIENT_ID=your_id_here
+      # - YOUTUBE_CLIENT_SECRET=your_secret_here
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - shorts-network
+
+networks:
+  shorts-network:
+    driver: bridge
+
+# Build and run with:
+# docker-compose up -d
+#
+# View logs:
+# docker-compose logs -f youtube-shorts
+#
+# Stop:
+# docker-compose down

@@ -1,0 +1,66 @@
+# ============================================================================
+# Google APIs & Gemini
+# ============================================================================
+google-generativeai>=0.3.0          # Gemini API
+google-api-python-client>=2.100.0   # YouTube API v3
+google-auth-httplib2>=0.2.0
+google-auth-oauthlib>=1.2.0
+groq>=0.1.0                         # Groq Python SDK (for openai/gpt-oss-120b)
+
+# ============================================================================
+# Text-to-Speech
+# ============================================================================
+gTTS>=2.4.0                         # Free Google Text-to-Speech
+pydub>=0.25.1                       # Audio processing (MP3 to WAV conversion)
+
+# ============================================================================
+# Video Editing & Processing
+# ============================================================================
+moviepy==1.0.3                      # Video composition
+opencv-python>=4.8.0                # Image/video processing (optional but recommended)
+
+# ============================================================================
+# Image Processing
+# ============================================================================
+Pillow>=10.0.0                      # Image generation and manipulation
+
+# ============================================================================
+# Web & API Integration
+# ============================================================================
+requests>=2.31.0                    # HTTP library (Pexels, TTSMaker, etc.)
+Flask>=3.0.0                        # Web server for keep-alive endpoint
+Werkzeug>=3.0.0                     # WSGI utilities
+
+# ============================================================================
+# Configuration & Environment
+# ============================================================================
+python-dotenv>=1.0.0                # Load environment variables from .env
+PyYAML>=6.0                         # YAML configuration file parsing
+
+# ============================================================================
+# Scheduling & Automation (Render Deployment)
+# ============================================================================
+APScheduler>=3.10.0                 # Background task scheduling
+pytz>=2023.3                        # Timezone support for scheduling
+
+# ============================================================================
+# Utilities & Logging
+# ============================================================================
+python-dateutil>=2.8.2              # Date/time utilities
+gunicorn>=21.0.0                    # Production WSGI server (for Render)
+
+# ============================================================================
+# Optional Dependencies (uncomment as needed)
+# ============================================================================
+# schedule>=1.2.0                    # Alternative simple scheduler
+# openai-whisper>=20230314           # Speech-to-text for captions
+# ffmpeg-python>=0.2.1               # FFmpeg integration
+
+# ============================================================================
+# Optional Dependencies (for advanced features)
+# ============================================================================
+# Uncomment if needed:
+# openai-whisper>=20230314           # Speech-to-text for captions
+# schedule>=1.2.0                    # Cron job scheduling
+# ffmpeg-python>=0.2.1               # FFmpeg integration for video processing
+# sqlite3                            # Built-in Python library

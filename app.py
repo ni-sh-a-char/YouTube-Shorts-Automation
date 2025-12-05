@@ -1,0 +1,147 @@
+"""
+app.py - Render deployment entry point
+
+This is the main entry point for Render. It:
+1. Starts the Flask keep-alive server (required to prevent app suspension)
+2. Runs the APScheduler in background for automated shorts generation
+3. Handles graceful shutdown
+
+The Flask server handles UptimeRobot pings on the / endpoint,
+while the scheduler runs the main video generation task in the background.
+
+Render will call: gunicorn app:app
+Or directly: python app.py
+
+Environment Variables:
+    PORT: HTTP port (default: 8080, set by Render)
+    UPLOAD_SCHEDULE_HOURS: Hours between video generations (default: 12)
+    TARGET_TOPIC: Topic for video generation (default: python)
+"""
+
+import os
+import logging
+import atexit
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Import Flask app from keep_alive
+from keep_alive import app
+
+# Import scheduler
+from scheduler import start_scheduler, stop_scheduler
+
+# Global scheduler reference
+scheduler = None
+
+
+def initialize_app():
+    """Initialize the application (run on startup)."""
+    global scheduler
+    
+    logger.info("=" * 80)
+    logger.info("🚀 YOUTUBE SHORTS AUTOMATION - RENDER DEPLOYMENT")
+    logger.info("=" * 80)
+    
+    # Get configuration
+    port = int(os.getenv('PORT', 8080))
+    interval_hours = int(os.getenv('UPLOAD_SCHEDULE_HOURS', 12))
+    # Prefer specific daily hour if provided
+    schedule_hour_env = os.getenv('UPLOAD_SCHEDULE_HOUR')
+    schedule_hour = int(schedule_hour_env) if schedule_hour_env is not None else None
+    timezone_str = os.getenv('LOCAL_TIMEZONE', os.getenv('TZ', 'Asia/Kolkata'))
+    topic = os.getenv('TARGET_TOPIC', 'python')
+
+    logger.info(f"🔧 Configuration:")
+    logger.info(f"   - Port: {port}")
+    if schedule_hour is not None:
+        logger.info(f"   - Schedule: Daily at {schedule_hour:02d}:00 ({timezone_str})")
+    else:
+        logger.info(f"   - Schedule: Every {interval_hours} hours")
+    logger.info(f"   - Topic: {topic}")
+    logger.info(f"   - Environment: {'Render' if os.getenv('RENDER') else 'Local'}")
+
+    # Start scheduler
+    try:
+        logger.info("\n⏰ Starting background scheduler...")
+        scheduler = start_scheduler(interval_hours=interval_hours, schedule_hour=schedule_hour, timezone_str=timezone_str, debug=False)
+        logger.info("✅ Scheduler initialized")
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize scheduler: {e}")
+        # Don't fail startup; flask will still work
+
+    logger.info("\n" + "=" * 80)
+    logger.info("✅ APPLICATION READY")
+    logger.info("=" * 80)
+    logger.info(f"🌐 Flask server listening on http://0.0.0.0:{port}")
+    logger.info(f"📍 Health check: GET http://localhost:{port}/")
+    if schedule_hour is not None:
+        logger.info(f"⏰ Scheduler running: daily at {schedule_hour:02d}:00 ({timezone_str})")
+    else:
+        logger.info(f"⏰ Scheduler running: videos every {interval_hours} hours")
+    logger.info("=" * 80)
+
+
+def cleanup_app():
+    """Cleanup on shutdown (run on exit)."""
+    global scheduler
+    
+    logger.info("\n🛑 Shutting down application...")
+    
+    if scheduler:
+        stop_scheduler(scheduler)
+    
+    logger.info("✅ Cleanup complete")
+
+
+# Register cleanup
+atexit.register(cleanup_app)
+
+# Initialize on import (for production servers like Gunicorn)
+try:
+    initialize_app()
+except Exception as e:
+    logger.error(f"⚠️  Initialization warning: {e}")
+
+
+@app.route('/api/scheduler/status', methods=['GET'])
+def scheduler_status():
+    """Check scheduler status."""
+    global scheduler
+    
+    if scheduler:
+        return {
+            'scheduler_running': scheduler.running,
+            'jobs': [
+                {
+                    'name': job.name,
+                    'id': job.id,
+                    'next_run_time': str(job.next_run_time) if job.next_run_time else 'None'
+                }
+                for job in scheduler.get_jobs()
+            ]
+        }, 200
+    else:
+        return {'scheduler_running': False, 'jobs': []}, 200
+
+
+if __name__ == '__main__':
+    # Direct execution (not recommended for production)
+    port = int(os.getenv('PORT', 8080))
+    logger.info(f"🏃 Running in development mode on port {port}")
+    logger.info("⚠️  For production, use: gunicorn app:app")
+    
+    app.run(
+        host='0.0.0.0',
+        port=port,
+        debug=False,
+        use_reloader=False
+    )
