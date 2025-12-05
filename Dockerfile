@@ -28,8 +28,8 @@ RUN pip install --upgrade pip && \
 # Copy application code
 COPY . .
 
-# Create necessary directories
-RUN mkdir -p /app/data/output /app/data/temp /app/logs
+# Create necessary directories (both ephemeral and persistent)
+RUN mkdir -p /app/data/output /app/data/temp /app/logs /data
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
