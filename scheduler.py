@@ -25,6 +25,7 @@ import logging
 import shutil
 import threading
 from datetime import datetime
+import time
 from typing import Optional
 from pathlib import Path
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -232,22 +233,37 @@ def generate_shorts_video():
             'categoryId': '22'  # Education category
         }
         
-        try:
-            video_id = upload_to_youtube(
-                video_path=video_path,
-                title=video_metadata.get('title', ''),
-                description=video_metadata.get('description', ''),
-                tags=','.join(video_metadata.get('tags', [])),
-                thumbnail_path=thumbnail_path
-            )
-            if not video_id:
-                raise Exception("Upload returned no video ID")
-            logger.info(f"✅ Video uploaded! ID: {video_id}")
-            logger.info(f"🎉 View at: https://youtube.com/shorts/{video_id}")
-        except Exception as upload_error:
-            logger.error(f"❌ Upload failed: {upload_error}")
-            logger.error(f"🔧 Check YouTube credentials and token validity")
-            raise
+        # Retry upload a few times to handle transient network/auth errors
+        upload_attempts = int(os.getenv('UPLOAD_RETRIES', '3'))
+        upload_backoff = int(os.getenv('UPLOAD_RETRY_BACKOFF_SEC', '5'))
+        video_id = None
+        last_exc = None
+        for attempt in range(1, upload_attempts + 1):
+            try:
+                logger.info(f"⬆️  Upload attempt {attempt}/{upload_attempts}...")
+                video_id = upload_to_youtube(
+                    video_path=video_path,
+                    title=video_metadata.get('title', ''),
+                    description=video_metadata.get('description', ''),
+                    tags=','.join(video_metadata.get('tags', [])),
+                    thumbnail_path=thumbnail_path
+                )
+                if not video_id:
+                    raise Exception("Upload returned no video ID")
+                logger.info(f"✅ Video uploaded! ID: {video_id}")
+                logger.info(f"🎉 View at: https://youtube.com/shorts/{video_id}")
+                last_exc = None
+                break
+            except Exception as upload_error:
+                last_exc = upload_error
+                logger.error(f"❌ Upload attempt {attempt} failed: {upload_error}")
+                if attempt < upload_attempts:
+                    logger.info(f"⏳ Retrying in {upload_backoff} seconds...")
+                    time.sleep(upload_backoff)
+
+        if last_exc:
+            logger.error(f"🔧 All upload attempts failed. Last error: {last_exc}")
+            raise last_exc
         
         # Step 8: Cleanup output folder after successful upload
         logger.info("\n[8/8] Cleaning up temporary files...")

@@ -26,6 +26,7 @@ load_dotenv()
 
 # Flag file location on persistent disk (Render: /data)
 STARTUP_FLAG_FILE = Path('/data/.startup_verification_complete') if os.path.exists('/data') else Path('.startup_verification_complete')
+STARTUP_INPROGRESS_FILE = STARTUP_FLAG_FILE.with_suffix('.inprogress')
 
 
 def should_run_startup_verification() -> bool:
@@ -43,9 +44,14 @@ def should_run_startup_verification() -> bool:
     # Check run-once mode
     run_once = os.getenv('STARTUP_VERIFICATION_RUN_ONCE', 'false').lower() in ('true', '1', 'yes')
     
-    if run_once and STARTUP_FLAG_FILE.exists():
-        logger.info("⏭️  Startup verification already completed on previous boot (STARTUP_VERIFICATION_RUN_ONCE=true)")
-        return False
+    if run_once:
+        if STARTUP_FLAG_FILE.exists():
+            logger.info("⏭️  Startup verification already completed on previous boot (STARTUP_VERIFICATION_RUN_ONCE=true)")
+            return False
+        # If an in-progress marker exists, avoid starting another concurrent verification
+        if STARTUP_INPROGRESS_FILE.exists():
+            logger.info("⏳ Startup verification already in progress (in-progress marker found). Skipping this trigger.")
+            return False
     
     return True
 
@@ -83,6 +89,12 @@ def generate_startup_short() -> dict:
         # Temporarily set topic
         os.environ['TARGET_TOPIC'] = topic
         
+        # Create in-progress marker to prevent duplicates
+        try:
+            STARTUP_INPROGRESS_FILE.write_text(f"started:{datetime.now().isoformat()}\n")
+        except Exception:
+            logger.warning("⚠️ Could not write startup in-progress marker; continuing anyway")
+
         # Run the full pipeline
         result = generate_shorts_video()
         
@@ -112,7 +124,13 @@ def generate_startup_short() -> dict:
                     STARTUP_FLAG_FILE.write_text(f"Verification completed at {datetime.now().isoformat()}\nVideo ID: {video_id}\n")
                     logger.info(f"💾 Saved completion flag to {STARTUP_FLAG_FILE}")
                 except Exception as e:
-                    logger.warning(f"⚠️  Could not write flag file (will re-run on next boot): {e}")
+                    logger.warning(f"⚠️  Could not write flag file: {e}")
+            # Remove in-progress marker
+            try:
+                if STARTUP_INPROGRESS_FILE.exists():
+                    STARTUP_INPROGRESS_FILE.unlink()
+            except Exception:
+                pass
             
             return {
                 'status': 'verified',
@@ -130,6 +148,13 @@ def generate_startup_short() -> dict:
             logger.error("Check logs above for details.")
             logger.error("=" * 80)
             
+            # Remove in-progress marker on failure as well so it won't block future manual attempts
+            try:
+                if STARTUP_INPROGRESS_FILE.exists():
+                    STARTUP_INPROGRESS_FILE.unlink()
+            except Exception:
+                pass
+
             return {
                 'status': 'failed',
                 'message': f'Startup verification failed: {error}',
@@ -145,6 +170,13 @@ def generate_startup_short() -> dict:
         logger.error("\nThe system may still function, but verification failed.")
         logger.error("=" * 80)
         
+        # Ensure in-progress marker removed on unexpected exception
+        try:
+            if STARTUP_INPROGRESS_FILE.exists():
+                STARTUP_INPROGRESS_FILE.unlink()
+        except Exception:
+            pass
+
         return {
             'status': 'error',
             'message': f'Startup verification exception: {str(e)}',
