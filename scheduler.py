@@ -93,10 +93,9 @@ def generate_shorts_video():
             return {'status': 'skipped', 'message': 'Task already running'}
         _task_running = True
     
-    try:
-        logger.info("=" * 80)
-        logger.info("🎬 STARTING SHORTS GENERATION TASK")
-        logger.info("=" * 80)
+    logger.info("=" * 80)
+    logger.info("🎬 STARTING SHORTS GENERATION TASK")
+    logger.info("=" * 80)
     
     try:
         # Import modules here to allow for better error handling
@@ -269,7 +268,6 @@ def generate_shorts_video():
         }
     finally:
         # Always release the lock
-        global _task_running
         with _task_lock:
             _task_running = False
 
