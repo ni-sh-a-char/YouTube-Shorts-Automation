@@ -212,20 +212,66 @@ def generate_shorts_video():
             'visual_cues': visual_cues
         }
 
+        # Run video assembly in a separate process with a timeout to avoid
+        # blocking the worker indefinitely (MoviePy can be long-running).
+        import multiprocessing
+        import traceback
+
+        def _run_video_assembly(q, script_data, srt_path, thumbnail_path, title, output_file, timestamp):
+            try:
+                ve = VideoEditor()
+                path = ve.create_shorts_video(
+                    script_data=script_data,
+                    captions_srt_path=srt_path,
+                    thumbnail_path=thumbnail_path,
+                    title=title,
+                    output_file=output_file,
+                    timestamp=timestamp
+                )
+                q.put({'ok': True, 'path': path})
+            except Exception as exc:
+                q.put({'ok': False, 'error': str(exc), 'trace': traceback.format_exc()})
+
+        logger.info("🎬 Starting video composition (slides, audio, captions...) in worker process")
+        q: multiprocessing.Queue = multiprocessing.Queue()
+        output_file = f"output/shorts/video_{timestamp}.mp4"
+        p = multiprocessing.Process(
+            target=_run_video_assembly,
+            args=(q, script_data, srt_path, thumbnail_path, idea.get('title'), output_file, timestamp),
+            name=f"video_assembly_{timestamp}"
+        )
+        p.start()
+
+        # Configurable timeout (seconds)
+        timeout_sec = int(os.getenv('VIDEO_ASSEMBLY_TIMEOUT_SEC', '300'))
+        logger.info(f"⏱️ Video assembly timeout set to {timeout_sec}s")
+
+        p.join(timeout=timeout_sec)
+        if p.is_alive():
+            logger.error(f"❌ Video assembly exceeded timeout of {timeout_sec}s; terminating process")
+            try:
+                p.terminate()
+            except Exception:
+                logger.exception("Failed to terminate video assembly process")
+            raise RuntimeError(f"Video assembly exceeded timeout of {timeout_sec}s")
+
+        # Read result from queue
         try:
-            logger.info("🎬 Starting video composition (slides, audio, captions)...")
-            video_path = video_editor.create_shorts_video(
-                script_data=script_data,
-                captions_srt_path=srt_path,
-                thumbnail_path=thumbnail_path,
-                title=idea.get('title'),
-                output_file=f"output/shorts/video_{timestamp}.mp4",
-                timestamp=timestamp
-            )
-            logger.info(f"✅ Video created: {video_path}")
-        except Exception as e:
-            logger.error(f"❌ Video assembly failed: {e}")
-            raise
+            result = q.get_nowait() if not q.empty() else None
+        except Exception:
+            result = None
+
+        if not result:
+            logger.error("❌ Video assembly process finished without returning a result")
+            raise RuntimeError("Video assembly failed with no result")
+
+        if not result.get('ok'):
+            logger.error(f"❌ Video assembly failed: {result.get('error')}")
+            logger.debug(result.get('trace'))
+            raise RuntimeError(f"Video assembly error: {result.get('error')}")
+
+        video_path = result.get('path')
+        logger.info(f"✅ Video created: {video_path}")
         
         # Step 7: Upload to YouTube
         logger.info("\n[7/7] Uploading to YouTube...")
