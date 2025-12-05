@@ -99,25 +99,38 @@ class ShortScriptCreator:
         topic: str,
         duration: int,
     ) -> str:
-        """
-        Create Gemini prompt for script generation.
-        
-        Args:
-            idea: Idea dictionary
-            topic: Topic
-            duration: Video duration
-            
-        Returns:
-            Formatted prompt
-        """
-        # Target ~150 words per minute. For 30s, that's ~75 words.
-        # We want a bit more density for Shorts, so ~160 wpm.
-        word_count = int((duration / 60) * 160)
+                """
+                Create the LLM prompt for viral-style short script generation.
 
-        # Speakable prompt template: short sentences, explicit [PAUSE] tokens,
-        # narration separated from on-screen code. Output JSON only.
-        return f"""You are a friendly, clear presenter creating a spoken script for a {duration}-second YouTube Short.
-Output JSON only. Produce a single object with keys: "script", "duration_seconds", "estimated_word_count", "visual_cues", "keywords", "reading_notes", "difficulty".
+                Returns a string prompt configured for the requested duration.
+                """
+                # Estimate words: use slightly faster rate for Shorts
+                estimated = self._estimate_word_count(duration)
+
+                # Viral-style 30s Short structure prompt. Request explicit [PAUSE] tokens
+                # and per-cue timing. Output must be valid JSON only and follow the
+                # exact schema described.
+                return f"""You are a top-tier short-form creator. Produce a voice-first, 30-second YouTube Short script optimized for attention and pacing.
+Output JSON only. Produce a single JSON object with keys: "script", "duration_seconds", "estimated_word_count", "visual_cues", "keywords", "reading_notes", "difficulty".
+
+Constraints (follow exactly):
+- Total `duration_seconds`: {duration} (do not change).
+- `script`: Spoken-first narration. Structure it into three beats:
+    1) HOOK (0–3s): One gripping sentence (emotion, surprise or fact). End with [PAUSE].
+    2) CORE MESSAGE (4–20s): 3–5 short sentences (each 4–10 words). Put [PAUSE] between each sentence.
+    3) PAYOFF / CTA (21–30s): 1–2 sentences that transform or call-to-action. End with [PAUSE].
+- Use [PAUSE] tokens to indicate intentional breath/pause points for TTS.
+- `estimated_word_count`: integer, approx {estimated} words.
+
+Visual cues:
+- Provide `visual_cues` as a list of objects with keys: `time_seconds` (number), `duration_seconds` (number), `type` (one of "text","b-roll","screenshot","image"), `content` (short on-screen text or description), and optional `transition` ("fade","zoom","slide").
+- Visual cues must align with the narration and cover each beat. Vary types across the video.
+
+Reading notes:
+- Provide `reading_notes` with speaking_rate ("normal"/"slower"), tone (e.g., "confident"), and emphasize words/phrases separated by commas.
+
+Keywords & difficulty:
+- Provide `keywords` array and `difficulty` string ("beginner"/"intermediate").
 
 Input Idea:
 Title: {idea.get('title')}
@@ -125,32 +138,10 @@ Hook Concept: {idea.get('hook')}
 Core Value: {idea.get('body')}
 CTA: {idea.get('cta')}
 
-Strict rules (follow exactly):
-1. Write the spoken `script` as plain text only. Use short sentences (8–14 words each). Use [PAUSE] to indicate a short pause. Avoid code blocks or markdown.
-2. Provide `visual_cues` as a JSON list of objects with keys: `time_seconds` (number), `type` ("text"|"code"|"screenshot"), and `content` (string). `content` is what appears on-screen; keep it concise.
-3. When showing code: explain the idea in plain English first in the narration, then include the exact code in a `visual_cues` entry with `type":"code"`.
-   - Do NOT read punctuation verbatim in the narration; instead describe code plainly. Keep code short (single line when possible).
-4. Hook: one high-impact short sentence at the start (<=8 words).
-5. Include one concrete example, shown visually and explained verbally with 1–2 short sentences.
-6. Provide `reading_notes` with: speaking_rate ("normal"/"slower"), tone, and which words to emphasize.
-7. Estimated word count should be approximately {word_count} words.
+Example minimal `visual_cues` item:
+{{"time_seconds":0, "duration_seconds":3, "type":"text", "content":"⚡ QUICK TECH HACK", "transition":"zoom"}}
 
-Example output structure (generate exactly this shape):
-{{
-  "script": "Hook sentence. [PAUSE] Narration sentence. [PAUSE] ...",
-  "duration_seconds": {duration},
-  "estimated_word_count": {word_count},
-  "visual_cues": [
-    {{"time_seconds": 0, "type": "text", "content": "MERGE TWO DICTS IN 1 LINE"}},
-    {{"time_seconds": 3, "type": "code", "content": "a = {{**x, **y}}"}},
-    {{"time_seconds": 10, "type": "text", "content": "This creates a new dict 'a' containing keys from x and y."}}
-  ],
-  "keywords": ["python", "dict", "merge"],
-  "reading_notes": "speaking_rate:normal; tone:confident; emphasize:'one line','merge'",
-  "difficulty": "beginner"
-}}
-
-Generate the JSON now. No markdown and no extra commentary."""
+Return only the JSON object. No commentary, no markdown, exact JSON shape requested."""
 
     def _estimate_word_count(self, duration_seconds: int) -> int:
         """Estimate word count for voiceover duration."""
@@ -176,34 +167,79 @@ Generate the JSON now. No markdown and no extra commentary."""
             Parsed script data
         """
         try:
-            # Clean up response
+            # Clean up response and extract JSON
             json_str = response_text.strip()
-            
-            # Remove markdown code blocks if present
+
             if json_str.startswith('```'):
                 json_str = json_str.split('```')[1]
                 if json_str.startswith('json'):
                     json_str = json_str[4:]
                 json_str = json_str.strip()
-            
-            # Parse JSON
+
             script_data = json.loads(json_str)
-            
-            # Validate structure
-            required_keys = ['script', 'duration_seconds', 'visual_cues']
-            missing = [k for k in required_keys if k not in script_data]
-            
-            if missing:
-                raise ValueError(f"Response missing required keys: {missing}")
-            
-            # Ensure visual_cues is a list
-            if not isinstance(script_data.get('visual_cues'), list):
-                script_data['visual_cues'] = []
-            
-            # Extract keywords if not provided
+
+            # Required keys
+            if 'script' not in script_data:
+                raise ValueError("Response missing 'script' key")
+
+            # Ensure duration is set
+            script_data['duration_seconds'] = int(script_data.get('duration_seconds', duration_seconds))
+
+            # Provide estimated_word_count if missing
+            if not script_data.get('estimated_word_count'):
+                script_data['estimated_word_count'] = self._estimate_word_count(script_data['duration_seconds'])
+
+            # Ensure keywords
             if not script_data.get('keywords'):
                 script_data['keywords'] = extract_keywords(script_data['script'])
-            
+
+            # Normalize visual_cues
+            visual_cues = script_data.get('visual_cues') or []
+            if not isinstance(visual_cues, list):
+                visual_cues = []
+
+            # If visual_cues provided but missing timing, derive timings from [PAUSE] split
+            if visual_cues and all(('time_seconds' in v and 'duration_seconds' in v) for v in visual_cues):
+                # keep as-is
+                script_data['visual_cues'] = visual_cues
+            else:
+                # Build cues from narration by splitting on [PAUSE]
+                chunks = [c.strip() for c in script_data['script'].split('[PAUSE]') if c.strip()]
+                if not chunks:
+                    chunks = [script_data['script'].strip()]
+
+                # Compute durations proportional to word counts
+                words = [len(c.split()) for c in chunks]
+                total_words = sum(words) or 1
+                cues = []
+                current_t = 0.0
+                for i, chunk in enumerate(chunks):
+                    dur = max(0.5, (words[i] / total_words) * script_data['duration_seconds'])
+                    cue_type = 'text' if i == 0 else ('b-roll' if i % 2 == 0 else 'image')
+                    cues.append({
+                        'time_seconds': round(current_t, 2),
+                        'duration_seconds': round(dur, 2),
+                        'type': cue_type,
+                        'content': (chunk[:120]).strip(),
+                        'transition': 'fade' if i > 0 else 'zoom'
+                    })
+                    current_t += dur
+
+                # Normalize final cue durations to fit exactly into total duration
+                if cues:
+                    last = cues[-1]
+                    overflow = current_t - script_data['duration_seconds']
+                    if overflow > 0:
+                        last['duration_seconds'] = max(0.5, last['duration_seconds'] - overflow)
+
+                script_data['visual_cues'] = cues
+
+            # Final safety: ensure visual_cues types are within allowed set
+            allowed = {'text', 'b-roll', 'screenshot', 'image'}
+            for v in script_data['visual_cues']:
+                if v.get('type') not in allowed:
+                    v['type'] = 'image'
+
             return script_data
         
         except json.JSONDecodeError as e:

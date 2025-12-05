@@ -395,6 +395,11 @@ class Config:
         
         for dir_path in dirs:
             dir_path.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def viral_format(self) -> bool:
+        """Toggle to enable viral-style script/video formatting."""
+        return os.getenv('VIRAL_FORMAT', 'false').lower() == 'true'
     
     def to_dict(self) -> Dict[str, Any]:
         """Export configuration as dictionary."""
@@ -410,6 +415,7 @@ class Config:
             'batch_size': self.batch_size,
             'dry_run': self.dry_run,
             'verbose': self.verbose,
+            'viral_format': os.getenv('VIRAL_FORMAT', 'false').lower() == 'true',
             'output_dir': str(self.output_dir),
             'temp_dir': str(self.temp_dir),
             'log_dir': str(self.log_dir),

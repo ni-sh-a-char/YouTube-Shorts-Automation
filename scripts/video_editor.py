@@ -5,6 +5,11 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from src.generator import create_video
 from scripts.config import get_config
+from moviepy.editor import ImageClip, VideoFileClip, AudioFileClip, CompositeVideoClip, concatenate_videoclips, TextClip, CompositeAudioClip, vfx
+import math
+import requests
+import tempfile
+from src.generator import get_pexels_video, get_pexels_image
 
 
 class VideoEditor:
@@ -76,53 +81,168 @@ class VideoEditor:
             slides_dir.mkdir(parents=True, exist_ok=True)
             audio_dir.mkdir(parents=True, exist_ok=True)
 
-            # Use visual cues from script_data if available, otherwise split script into sentences
+            # Use visual cues from script_data if available, otherwise split script into chunks
             visual_cues = script_data.get('visual_cues') or []
             script_text = script_data.get('script', '')
 
-            # Generate a single audio file for the entire script
-            # (no per-segment generation to avoid duplication)
+            # TTS and visuals generator
             from src.tts_generator import generate_voice
             from src.generator import generate_visuals
 
-            # Generate the complete audio once
-            audio_dir.mkdir(parents=True, exist_ok=True)
+            # Generate the complete audio (the TTS generator will split on [PAUSE]
+            # and insert silences as required)
             full_audio_path = audio_dir / f"audio_full_{ts}.mp3"
-            
-            # Use edge-tts to generate one continuous audio file
             try:
                 generate_voice(script_text, str(full_audio_path))
             except Exception as e:
-                print(f"⚠️ edge-tts failed ({e}), trying fallback gTTS...")
+                print(f"⚠️ TTS failed ({e}), trying fallback gTTS for full script...")
                 from gtts import gTTS
-                tts = gTTS(text=script_text, lang='en', slow=False)
+                tts = gTTS(text=script_text.replace('[PAUSE]', ' '), lang='en', slow=False)
                 tts.save(str(full_audio_path))
-            
-            # If visual_cues are not provided, generate them from the script
+
+            # If visual_cues are not provided or missing timing, attempt to parse script_data
             if not visual_cues:
-                # Split script into chunks for visual cues (ignoring [PAUSE] for now)
                 chunks = [s.strip() for s in script_text.replace('[PAUSE]', '.').split('.') if s.strip()]
-                seg_len = max(1, int(script_data.get('duration_seconds', self.config.video_duration_seconds) / max(1, len(chunks))))
-                visual_cues = [{'time_seconds': i * seg_len, 'type': 'text', 'content': chunk[:120]} for i, chunk in enumerate(chunks)]
+                dur = script_data.get('duration_seconds', self.config.video_duration_seconds)
+                seg_len = max(1.0, dur / max(1, len(chunks)))
+                visual_cues = [{'time_seconds': round(i * seg_len, 2), 'duration_seconds': round(seg_len, 2), 'type': 'text', 'content': chunk[:120]} for i, chunk in enumerate(chunks)]
 
-            # Generate slides only (use the single audio file)
-            slide_paths = []
-
+            # Generate image slides for each visual cue and prepare timed clips
+            slide_items = []
             for i, cue in enumerate(visual_cues):
-                # Get content from either 'cue' (legacy) or 'content' (new format)
                 cue_text = cue.get('content') or cue.get('cue', '')
-                slide_path = generate_visuals(output_dir=slides_dir, video_type='short', slide_content={'title': title or '', 'content': cue_text}, slide_number=i+1, total_slides=len(visual_cues))
-                slide_paths.append(str(slide_path))
 
-            success = self.create_short_video(
-                slide_paths=slide_paths,
-                audio_paths=[str(full_audio_path)],
-                output_path=output_path,
-                captions_srt=Path(captions_srt_path) if captions_srt_path else None,
-            )
+                # For visual types that represent footage or images, try to fetch
+                # matching stock video or image. If not available, fall back to
+                # generated slide with the cue text.
+                media_path = None
+                media_is_video = False
 
-            if not success:
-                raise RuntimeError("VideoEditor failed to create the short video")
+                if cue.get('type') in ('b-roll', 'image', 'screenshot'):
+                    # Try to fetch a relevant Pexels video first
+                    try:
+                        video_url = get_pexels_video(cue_text, orientation='portrait')
+                        if video_url:
+                            # Download to temp file
+                            r = requests.get(video_url, stream=True, timeout=15)
+                            if r.status_code == 200:
+                                tmpf = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+                                with open(tmpf.name, 'wb') as fh:
+                                    for chunk in r.iter_content(chunk_size=8192):
+                                        fh.write(chunk)
+                                media_path = tmpf.name
+                                media_is_video = True
+                    except Exception:
+                        media_path = None
+
+                    # If no video found, try an image
+                    if not media_path:
+                        try:
+                            img = get_pexels_image(cue_text, 'short')
+                            if img:
+                                tmpf = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
+                                img.save(tmpf.name)
+                                media_path = tmpf.name
+                                media_is_video = False
+                        except Exception:
+                            media_path = None
+
+                # If media not found, fallback to generated slide with text
+                if not media_path:
+                    slide_path = generate_visuals(output_dir=slides_dir, video_type='short', slide_content={'title': title or '', 'content': cue_text}, slide_number=i+1, total_slides=len(visual_cues))
+                    slide_items.append({'path': str(slide_path), 'cue': cue, 'is_video': False})
+                else:
+                    slide_items.append({'path': str(media_path), 'cue': cue, 'is_video': media_is_video})
+
+            # Compose video using absolute cue timings so clips don't stack on top
+            clips = []
+            W, H = self.config.video_resolution
+            for item in slide_items:
+                path = item['path']
+                cue = item['cue']
+                is_video = item.get('is_video', False)
+                start_t = float(cue.get('time_seconds', 0))
+                duration = float(cue.get('duration_seconds', max(1.0, script_data.get('duration_seconds', self.config.video_duration_seconds) / max(1, len(slide_items)))))
+
+                if is_video:
+                    try:
+                        vclip = VideoFileClip(path).set_start(start_t)
+                        # If the video clip is longer than needed, subclip
+                        if vclip.duration > duration:
+                            vclip = vclip.subclip(0, duration).set_duration(duration)
+                        else:
+                            vclip = vclip.set_duration(duration)
+
+                        # Resize to width and preserve aspect
+                        try:
+                            vclip = vclip.resize(width=W)
+                        except Exception:
+                            pass
+
+                        # Gentle crossfade in
+                        try:
+                            vclip = vclip.crossfadein(min(0.35, duration * 0.2))
+                        except Exception:
+                            pass
+
+                        clips.append(vclip)
+                    except Exception:
+                        # Fallback to image slide if video fails
+                        img_clip = ImageClip(path).set_start(start_t).set_duration(duration)
+                        try:
+                            img_clip = img_clip.resize(width=W)
+                        except Exception:
+                            pass
+                        clips.append(img_clip)
+                else:
+                    # Image or generated slide
+                    img_clip = ImageClip(path).set_start(start_t).set_duration(duration)
+                    try:
+                        img_clip = img_clip.resize(width=W)
+                    except Exception:
+                        pass
+
+                    # Apply subtle Ken Burns to images
+                    try:
+                        img_clip = img_clip.fx(vfx.resize, lambda t: 1 + 0.03 * (t / max(0.0001, duration)))
+                    except Exception:
+                        pass
+
+                    try:
+                        img_clip = img_clip.crossfadein(min(0.35, duration * 0.2))
+                    except Exception:
+                        pass
+
+                    clips.append(img_clip)
+
+                # Only display literal text overlays for cues with type 'text'
+                if cue.get('type') == 'text' and int(start_t) == 0:
+                    txt = cue.get('content', '')
+                    try:
+                        txt_clip = TextClip(txt, fontsize=72, color='white', stroke_color='black', stroke_width=2)
+                        txt_clip = txt_clip.set_start(start_t).set_duration(min(3.0, duration)).set_position(('center', 80)).crossfadein(0.15)
+                        clips.append(txt_clip)
+                    except Exception:
+                        pass
+
+            # Build composite timeline using absolute starts
+            total_duration = script_data.get('duration_seconds', self.config.video_duration_seconds)
+            try:
+                composite = CompositeVideoClip(clips, size=(W, H)).set_duration(total_duration)
+            except Exception:
+                # Fallback: naive concatenation if composition fails
+                simple_clips = [c.set_start(0) for c in clips]
+                composite = CompositeVideoClip(simple_clips, size=(W, H)).set_duration(total_duration)
+
+            # Attach audio aligned to timeline
+            try:
+                audio = AudioFileClip(str(full_audio_path))
+                composite = composite.set_audio(audio)
+            except Exception as e:
+                print(f"⚠️ Could not attach audio: {e}")
+
+            # Export final video
+            composite.write_videofile(str(output_path), fps=self.config.video_fps, codec='libx264', audio_codec='aac')
 
             return str(output_path)
 

@@ -70,16 +70,24 @@ class IdeaGenerator:
         """
         # Enforce minimum 30 seconds
         duration = max(duration, 30)
-        return f"""You are a viral YouTube Shorts content creator specializing in tech and coding content.
 
-Generate {num_ideas} engaging and viral YouTube Shorts ideas about "{topic}" that will appeal to software developers, programmers, and tech enthusiasts.
+        # If the workspace/content should avoid coding, explicitly instruct the model
+        avoid_coding_instruction = (
+            "IMPORTANT: Do NOT include any code, code snippets, terminal output, IDE shots, or programming\ncommands. Create non-technical, general-audience ideas (e.g., lifestyle, productivity, finance, health,\ncreativity, quick tips) instead."
+        )
+
+        return f"""You are a viral YouTube Shorts content creator.
+
+{avoid_coding_instruction}
+
+Generate {num_ideas} engaging and viral YouTube Shorts ideas about "{topic}" suitable for a broad audience.
 
 Each idea should:
 1. Be suitable for a {duration}-second video
 2. Start with a compelling hook (first 2 seconds)
-3. Include a valuable tip, trick, or insight
+3. Include a concise, non-technical tip or insight
 4. End with a clear call-to-action or takeaway
-5. Include specific visual suggestions (code snippet, terminal, VS Code, etc.)
+5. Include specific visual suggestions (text overlay, b-roll, stock clips, photos, or simple motion graphics)
 
 Format your response as a JSON array with exactly {num_ideas} objects. Each object must have these keys:
 - "id": unique ID (integer 1-{num_ideas})
@@ -88,7 +96,7 @@ Format your response as a JSON array with exactly {num_ideas} objects. Each obje
 - "hook": compelling opening (max 100 chars, appears first 2 seconds)
 - "body": main tip/trick/insight (max 300 chars)
 - "cta": call-to-action or conclusion (max 100 chars)
-- "visual_cues": suggested visual elements (code, terminal, demo, etc.)
+- "visual_cues": suggested visual elements (describe footage, b-roll, text overlays, or animations)
 - "keywords": comma-separated keywords for this idea
 - "difficulty": beginner, intermediate, or advanced
 
@@ -96,17 +104,17 @@ Return ONLY valid JSON, starting with [ and ending with ]. Do not include markdo
 
 Example format (not the actual content):
 [
-  {{
-    "id": 1,
-    "title": "Python List Trick That Saves Hours",
-    "duration_seconds": {duration},
-    "hook": "Did you know this Python trick?",
-    "body": "Use list comprehension instead of loops. It's faster and more readable. Here's how: [x*2 for x in range(10)]",
-    "cta": "Try it in your next project!",
-    "visual_cues": "Python code snippet, terminal output",
-    "keywords": "Python, List Comprehension, Performance, Coding Tips",
-    "difficulty": "beginner"
-  }}
+    {{
+        "id": 1,
+        "title": "One-Minute Morning Routine to Boost Energy",
+        "duration_seconds": {duration},
+        "hook": "Want more energy before your coffee?",
+        "body": "Try this 1-minute stretch and breathing routine to feel energized and focused.",
+        "cta": "Try this tomorrow morning!",
+        "visual_cues": "person stretching, close-up of breath, text-overlay steps",
+        "keywords": "morning routine, energy, wellness",
+        "difficulty": "beginner"
+    }}
 ]
 """
     
@@ -185,6 +193,15 @@ Example format (not the actual content):
         """
         if topics is None:
             topics = self.config.topics_rotation
+
+        # Filter out coding/programming topics if present — user requested non-coding content
+        coding_keywords = ['code', 'python', 'javascript', 'java', 'programming', 'developer', 'dev', 'git', 'vscode', 'terminal', 'bash', 'linux']
+        filtered = [t for t in topics if not any(kw in t.lower() for kw in coding_keywords)]
+        if not filtered:
+            # If all provided topics are coding, fall back to a set of non-coding topics
+            filtered = ['productivity', 'life hacks', 'mental health', 'personal finance', 'cooking hacks', 'travel tips', 'creativity']
+
+        topics = filtered
         
         all_ideas = {}
         

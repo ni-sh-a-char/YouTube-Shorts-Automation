@@ -12,10 +12,24 @@ from typing import List
 import edge_tts
 import imageio_ffmpeg
 from xml.sax.saxutils import escape as xml_escape
+import tempfile
+import subprocess
+from pathlib import Path
 
 def get_ffmpeg_exe():
     """Get the path to the embedded ffmpeg executable."""
     return imageio_ffmpeg.get_ffmpeg_exe()
+
+
+def split_for_tts(text: str):
+    """Split text on [PAUSE] markers for chunked TTS generation.
+
+    Returns list of trimmed chunks.
+    """
+    if not text:
+        return []
+    parts = [p.strip() for p in text.split('[PAUSE]')]
+    return [p for p in parts if p]
 
 async def _generate_voice_async(text: str, output_path: str, voice: str = "en-US-ChristopherNeural") -> None:
     """Async helper to generate voice."""
@@ -39,43 +53,68 @@ def generate_voice(text: str, output_path: str = "data/audio/voice.mp3") -> str:
     out_dir = out_path.parent
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Use a high-quality male voice by default, can be configured later
-    # Options: en-US-ChristopherNeural, en-US-EricNeural, en-US-GuyNeural
     VOICE = "en-US-ChristopherNeural"
 
-    # If the script contains [PAUSE] tokens, convert to SSML <break/> tags
-    # so the TTS engine inserts silence instead of speaking the word "pause".
-    try:
-        text_str = str(text)
-        if "[PAUSE]" in text_str:
-            parts = [xml_escape(p.strip()) for p in text_str.split('[PAUSE]')]
-            # join with a 300ms break
-            ssml_body = "<break time='300ms'/>".join(parts)
-            ssml = f"<speak>{ssml_body}</speak>"
-            asyncio.run(_generate_voice_async(ssml, str(out_path), VOICE))
-        else:
-            asyncio.run(_generate_voice_async(text_str, str(out_path), VOICE))
+    chunks = split_for_tts(str(text))
+    # If no explicit pauses, treat the whole text as one chunk
+    if not chunks:
+        chunks = [str(text).strip()]
 
-        # Verify file exists and has size
-        if not out_path.exists() or out_path.stat().st_size == 0:
-            raise RuntimeError("Generated audio file is empty or missing")
+    temp_files = []
+    try:
+        for idx, chunk in enumerate(chunks):
+            # Use plain text for chunked generation (avoid sending SSML tags that
+            # some engines may vocalize). Pauses are handled by inserting silence
+            # files between chunks, so we send only readable text here.
+            safe_chunk = chunk.replace('[PAUSE]', ' ').strip()
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f"_{idx}.mp3")
+            tmp.close()
+            try:
+                asyncio.run(_generate_voice_async(safe_chunk, tmp.name, VOICE))
+                temp_files.append(tmp.name)
+            except Exception as e:
+                # Fallback per-chunk to gTTS
+                print(f"⚠️ edge-tts chunk failed ({e}), falling back to gTTS for chunk {idx}...")
+                from gtts import gTTS
+                tts = gTTS(text=safe_chunk, lang="en", slow=False)
+                tts.save(tmp.name)
+                temp_files.append(tmp.name)
+
+        # Create a short silence file (400ms) to insert between chunks
+        ffmpeg_exe = get_ffmpeg_exe()
+        silence_tmp = tempfile.NamedTemporaryFile(delete=False, suffix="_silence.mp3")
+        silence_tmp.close()
+        silence_dur = 0.4
+        cmd = [ffmpeg_exe, '-y', '-f', 'lavfi', '-i', f"anullsrc=channel_layout=stereo:sample_rate=48000", '-t', str(silence_dur), '-q:a', '9', silence_tmp.name]
+        subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        # Interleave temp_files with silence files
+        concat_list = []
+        for i, fpath in enumerate(temp_files):
+            concat_list.append(fpath)
+            if i < len(temp_files) - 1:
+                concat_list.append(silence_tmp.name)
+
+        # Concatenate into final out_path
+        concatenate_audio(concat_list, str(out_path))
 
         print(f"✅ Voice generated: {out_path}")
         return str(out_path)
 
     except Exception as e:
-        print(f"❌ Error generating voice with edge-tts: {e}")
-        # Fallback to gTTS if edge-tts fails (e.g. network issues)
-        print("⚠️ Falling back to gTTS (will remove [PAUSE] tokens)...")
+        print(f"❌ Error generating voice: {e}")
+        raise
+    finally:
+        # Cleanup temp files
+        for f in temp_files:
+            try:
+                Path(f).unlink()
+            except Exception:
+                pass
         try:
-            from gtts import gTTS
-            safe_text = str(text).replace('[PAUSE]', ' ')
-            tts = gTTS(text=safe_text, lang="en", slow=False)
-            tts.save(str(out_path))
-            return str(out_path)
-        except Exception as e2:
-            print(f"❌ gTTS fallback also failed: {e2}")
-            raise e
+            Path(silence_tmp.name).unlink()
+        except Exception:
+            pass
 
 def concatenate_audio(audio_paths: List[str], output_path: str) -> str:
     """Concatenate multiple audio files using ffmpeg."""

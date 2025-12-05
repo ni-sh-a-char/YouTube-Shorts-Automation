@@ -112,3 +112,42 @@ def upload_to_youtube(video_path, title, description, tags, thumbnail_path=None)
         print(f"❌ ERROR: Failed to upload to YouTube. {e}")
         raise
 
+
+def generate_metadata_from_script(script_data: dict, topic: str = None):
+    """Generate title, description, tags from script JSON.
+
+    - Title: first hook line (max 50 chars)
+    - Description: short summary, topic keywords, and one hashtag
+    - Tags: pulled from `keywords` in script_data
+    """
+    script = script_data.get('script', '')
+    # Extract first line or sentence (stop at [PAUSE] or newline or period)
+    first = script.split('[PAUSE]')[0].strip()
+    first = first.split('\n')[0].strip()
+    if '.' in first:
+        first = first.split('.')[0].strip()
+
+    title = first[:50]
+
+    keywords = script_data.get('keywords') or []
+    tags = ','.join(keywords)
+
+    summary = ''
+    # Build a brief summary from the core message (try to find after first [PAUSE])
+    parts = [p.strip() for p in script.split('[PAUSE]') if p.strip()]
+    if len(parts) > 1:
+        summary = parts[1][:200]
+    else:
+        summary = ' '.join(parts)[:200]
+
+    hashtag = f"#{keywords[0].replace(' ', '')}" if keywords else (f"#{topic.replace(' ','')}" if topic else '')
+
+    description = f"{summary}\n\nKeywords: {', '.join(keywords)}\n{hashtag}"
+
+    return {
+        'title': title,
+        'description': description,
+        'tags': tags,
+        'hashtag': hashtag
+    }
+
