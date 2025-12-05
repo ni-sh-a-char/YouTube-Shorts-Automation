@@ -98,6 +98,21 @@ def generate_shorts_video():
     logger.info("=" * 80)
     
     try:
+        # Disk space guard: ensure at least 100 MB free before generating media
+        try:
+            total, used, free = shutil.disk_usage('.')
+            free_mb = free // (1024 * 1024)
+            logger.info(f"💾 Disk free: {free_mb} MB")
+            min_required_mb = int(os.getenv('MIN_FREE_DISK_MB', '100'))
+            if free_mb < min_required_mb:
+                logger.error(f"❌ Not enough disk space ({free_mb} MB). Required: {min_required_mb} MB. Aborting generation.")
+                # Attempt cleanup to free space
+                if os.getenv('CLEANUP_OUTPUT_AFTER_UPLOAD', 'true').lower() in ('true', '1', 'yes'):
+                    cleanup_output_folder('output/shorts')
+                return {'status': 'skipped', 'message': 'Insufficient disk space'}
+        except Exception as disk_e:
+            logger.warning(f"⚠️ Could not determine disk usage: {disk_e}")
+    
         # Import modules here to allow for better error handling
         from scripts.config import get_config
         from scripts.idea_generator import IdeaGenerator
@@ -259,7 +274,13 @@ def generate_shorts_video():
         logger.error("=" * 80)
         logger.error(f"Error: {str(e)}")
         logger.error("Traceback:", exc_info=True)
-        
+        # Attempt cleanup to free disk space if enabled
+        try:
+            if os.getenv('CLEANUP_OUTPUT_AFTER_UPLOAD', 'true').lower() in ('true', '1', 'yes'):
+                cleanup_output_folder('output/shorts')
+        except Exception as _:
+            logger.warning("⚠️ Cleanup after failure failed or was skipped")
+
         # Here you could add Slack notifications or other alerting
         return {
             'status': 'failed',
@@ -268,6 +289,13 @@ def generate_shorts_video():
         }
     finally:
         # Always release the lock
+        try:
+            if os.getenv('CLEANUP_OUTPUT_AFTER_UPLOAD', 'true').lower() in ('true', '1', 'yes'):
+                # Best-effort cleanup to free space between runs
+                cleanup_output_folder('output/shorts')
+        except Exception:
+            logger.warning("⚠️ Final cleanup failed")
+
         with _task_lock:
             _task_running = False
 
