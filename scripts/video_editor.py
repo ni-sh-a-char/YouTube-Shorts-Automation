@@ -241,8 +241,24 @@ class VideoEditor:
             except Exception as e:
                 print(f"⚠️ Could not attach audio: {e}")
 
-            # Export final video
-            composite.write_videofile(str(output_path), fps=self.config.video_fps, codec='libx264', audio_codec='aac')
+            # Export final video with detailed logging
+            import logging
+            logger = logging.getLogger(__name__)
+            try:
+                logger.info(f"🎥 Starting video file write to: {output_path}")
+                logger.info(f"   Resolution: {W}x{H} @ {self.config.video_fps}fps, Duration: {total_duration}s")
+                composite.write_videofile(
+                    str(output_path),
+                    fps=self.config.video_fps,
+                    codec='libx264',
+                    audio_codec='aac',
+                    verbose=False,
+                    logger=None  # Suppress moviepy's verbose logging
+                )
+                logger.info(f"✅ Video file write complete: {output_path}")
+            except Exception as e:
+                logger.error(f"❌ Video file write failed: {e}")
+                raise
 
             return str(output_path)
 

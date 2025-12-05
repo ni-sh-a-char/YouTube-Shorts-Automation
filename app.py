@@ -122,15 +122,20 @@ def initialize_app():
         logger.info(f"⏰ Scheduler running: videos every {interval_hours} hours")
     logger.info("=" * 80)
 
-    # Run startup verification if enabled — run in background thread to avoid blocking
-    logger.info("\n" + "=" * 80)
-    try:
-        t = threading.Thread(target=run_startup_verification_if_enabled, name="startup_verifier", daemon=True)
-        t.start()
-        logger.info("🔁 Startup verification launched in background thread (non-blocking)")
-    except Exception as e:
-        logger.warning(f"⚠️ Could not start startup verifier thread: {e}")
-    logger.info("=" * 80)
+    # Run startup verification ONLY if this process holds the lock (only one worker should run it)
+    if have_lock:
+        logger.info("\n" + "=" * 80)
+        try:
+            t = threading.Thread(target=run_startup_verification_if_enabled, name="startup_verifier", daemon=True)
+            t.start()
+            logger.info("🔁 Startup verification launched in background thread (non-blocking)")
+        except Exception as e:
+            logger.warning(f"⚠️ Could not start startup verifier thread: {e}")
+        logger.info("=" * 80)
+    else:
+        logger.info("\n" + "=" * 80)
+        logger.info("⏭️  Skipping startup verification in this worker (not the lock holder)")
+        logger.info("=" * 80)
 
 
 def cleanup_app():

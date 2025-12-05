@@ -202,6 +202,7 @@ def generate_shorts_video():
         
         # Step 6: Assemble video
         logger.info("\n[6/7] Assembling final video...")
+        logger.info(f"📝 Script length: {len(script)} chars, {duration}s target duration")
         video_editor = VideoEditor()
         # Pass structured script data (script + visual_cues) so the editor can
         # generate per-segment slides and per-segment TTS for a dynamic video.
@@ -211,15 +212,20 @@ def generate_shorts_video():
             'visual_cues': visual_cues
         }
 
-        video_path = video_editor.create_shorts_video(
-            script_data=script_data,
-            captions_srt_path=srt_path,
-            thumbnail_path=thumbnail_path,
-            title=idea.get('title'),
-            output_file=f"output/shorts/video_{timestamp}.mp4",
-            timestamp=timestamp
-        )
-        logger.info(f"✅ Video created: {video_path}")
+        try:
+            logger.info("🎬 Starting video composition (slides, audio, captions)...")
+            video_path = video_editor.create_shorts_video(
+                script_data=script_data,
+                captions_srt_path=srt_path,
+                thumbnail_path=thumbnail_path,
+                title=idea.get('title'),
+                output_file=f"output/shorts/video_{timestamp}.mp4",
+                timestamp=timestamp
+            )
+            logger.info(f"✅ Video created: {video_path}")
+        except Exception as e:
+            logger.error(f"❌ Video assembly failed: {e}")
+            raise
         
         # Step 7: Upload to YouTube
         logger.info("\n[7/7] Uploading to YouTube...")
