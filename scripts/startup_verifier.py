@@ -27,6 +27,7 @@ load_dotenv()
 # Flag file location on persistent disk (Render: /data)
 STARTUP_FLAG_FILE = Path('/data/.startup_verification_complete') if os.path.exists('/data') else Path('.startup_verification_complete')
 STARTUP_INPROGRESS_FILE = STARTUP_FLAG_FILE.with_suffix('.inprogress')
+STARTUP_FAILED_FILE = STARTUP_FLAG_FILE.with_suffix('.failed')
 
 
 def should_run_startup_verification() -> bool:
@@ -48,6 +49,23 @@ def should_run_startup_verification() -> bool:
         if STARTUP_FLAG_FILE.exists():
             logger.info("⏭️  Startup verification already completed on previous boot (STARTUP_VERIFICATION_RUN_ONCE=true)")
             return False
+        # If verification previously failed, respect cooldown to avoid repeated failures
+        cooldown_hours = int(os.getenv('STARTUP_VERIFICATION_FAILURE_COOLDOWN_HOURS', '6'))
+        if STARTUP_FAILED_FILE.exists():
+            try:
+                content = STARTUP_FAILED_FILE.read_text()
+                # first line expected to be ISO timestamp
+                first_line = content.splitlines()[0].strip()
+                failed_time = datetime.fromisoformat(first_line)
+                delta = datetime.now() - failed_time
+                if delta.total_seconds() < cooldown_hours * 3600:
+                    logger.info(f"⏭️  Previous startup verification failed {delta}, within cooldown ({cooldown_hours}h). Skipping new attempt.")
+                    return False
+                else:
+                    logger.info("🔁 Previous startup verification failed but cooldown expired; will attempt again.")
+            except Exception:
+                # If parsing fails, fall through and allow attempt
+                pass
         # If an in-progress marker exists, avoid starting another concurrent verification
         if STARTUP_INPROGRESS_FILE.exists():
             logger.info("⏳ Startup verification already in progress (in-progress marker found). Skipping this trigger.")
@@ -155,6 +173,14 @@ def generate_startup_short() -> dict:
             except Exception:
                 pass
 
+            # Write failed marker with timestamp and short error to avoid repeated attempts
+            try:
+                STARTUP_FAILED_FILE.parent.mkdir(parents=True, exist_ok=True)
+                STARTUP_FAILED_FILE.write_text(f"{datetime.now().isoformat()}\n{str(error)[:100]}\n")
+                logger.info(f"💾 Written failure marker to {STARTUP_FAILED_FILE}")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not write failure marker: {e}")
+
             return {
                 'status': 'failed',
                 'message': f'Startup verification failed: {error}',
@@ -174,6 +200,14 @@ def generate_startup_short() -> dict:
         try:
             if STARTUP_INPROGRESS_FILE.exists():
                 STARTUP_INPROGRESS_FILE.unlink()
+        except Exception:
+            pass
+
+        # Write failure marker on unexpected exception to prevent tight restart loops
+        try:
+            STARTUP_FAILED_FILE.parent.mkdir(parents=True, exist_ok=True)
+            STARTUP_FAILED_FILE.write_text(f"{datetime.now().isoformat()}\nException: {str(e)[:200]}\n")
+            logger.info(f"💾 Written failure marker to {STARTUP_FAILED_FILE} due to exception")
         except Exception:
             pass
 
