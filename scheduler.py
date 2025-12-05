@@ -23,6 +23,7 @@ Usage:
 import os
 import logging
 import shutil
+import threading
 from datetime import datetime
 from typing import Optional
 from pathlib import Path
@@ -33,6 +34,10 @@ import pytz
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
+
+# Global flag to prevent concurrent task runs
+_task_running = False
+_task_lock = threading.Lock()
 
 # Load environment variables
 load_dotenv()
@@ -77,10 +82,21 @@ def generate_shorts_video():
     7. Logs results
     
     Handles all exceptions gracefully and logs failures.
+    Prevents concurrent runs using a lock.
     """
-    logger.info("=" * 80)
-    logger.info("🎬 STARTING SHORTS GENERATION TASK")
-    logger.info("=" * 80)
+    global _task_running
+    
+    # Prevent overlapping task runs
+    with _task_lock:
+        if _task_running:
+            logger.warning("⚠️  Task already running. Skipping this cycle.")
+            return {'status': 'skipped', 'message': 'Task already running'}
+        _task_running = True
+    
+    try:
+        logger.info("=" * 80)
+        logger.info("🎬 STARTING SHORTS GENERATION TASK")
+        logger.info("=" * 80)
     
     try:
         # Import modules here to allow for better error handling
@@ -202,19 +218,29 @@ def generate_shorts_video():
             'categoryId': '22'  # Education category
         }
         
-        video_id = upload_to_youtube(
-            video_path=video_path,
-            title=video_metadata.get('title', ''),
-            description=video_metadata.get('description', ''),
-            tags=','.join(video_metadata.get('tags', [])),
-            thumbnail_path=thumbnail_path
-        )
-        logger.info(f"✅ Video uploaded! ID: {video_id}")
-        logger.info(f"🎉 View at: https://youtube.com/shorts/{video_id}")
+        try:
+            video_id = upload_to_youtube(
+                video_path=video_path,
+                title=video_metadata.get('title', ''),
+                description=video_metadata.get('description', ''),
+                tags=','.join(video_metadata.get('tags', [])),
+                thumbnail_path=thumbnail_path
+            )
+            if not video_id:
+                raise Exception("Upload returned no video ID")
+            logger.info(f"✅ Video uploaded! ID: {video_id}")
+            logger.info(f"🎉 View at: https://youtube.com/shorts/{video_id}")
+        except Exception as upload_error:
+            logger.error(f"❌ Upload failed: {upload_error}")
+            logger.error(f"🔧 Check YouTube credentials and token validity")
+            raise
         
         # Step 8: Cleanup output folder after successful upload
         logger.info("\n[8/8] Cleaning up temporary files...")
-        cleanup_output_folder('output/shorts')
+        if os.getenv('CLEANUP_OUTPUT_AFTER_UPLOAD', 'true').lower() in ('true', '1', 'yes'):
+            cleanup_output_folder('output/shorts')
+        else:
+            logger.info("↩️  Cleanup disabled (CLEANUP_OUTPUT_AFTER_UPLOAD=false)")
         
         # Log success
         logger.info("\n" + "=" * 80)
@@ -241,6 +267,11 @@ def generate_shorts_video():
             'error': str(e),
             'timestamp': datetime.now().strftime("%Y%m%d_%H%M%S")
         }
+    finally:
+        # Always release the lock
+        global _task_running
+        with _task_lock:
+            _task_running = False
 
 
 def generate_and_upload_short():
