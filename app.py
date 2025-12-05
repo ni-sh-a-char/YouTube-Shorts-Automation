@@ -22,6 +22,7 @@ import os
 import logging
 import atexit
 from dotenv import load_dotenv
+from pathlib import Path
 
 # Load environment variables
 load_dotenv()
@@ -73,14 +74,42 @@ def initialize_app():
     logger.info(f"   - Topic: {topic}")
     logger.info(f"   - Environment: {'Render' if os.getenv('RENDER') else 'Local'}")
 
-    # Start scheduler
+    # Ensure only one process in the container starts the scheduler/startup verifier
+    lock_path = Path(os.getenv('SINGLETON_LOCK_PATH', '/data/.app_singleton'))
+    have_lock = False
     try:
-        logger.info("\n⏰ Starting background scheduler...")
-        scheduler = start_scheduler(interval_hours=interval_hours, schedule_hour=schedule_hour, timezone_str=timezone_str, debug=False)
-        logger.info("✅ Scheduler initialized")
+        if lock_path.exists():
+            try:
+                pid_text = lock_path.read_text().strip()
+                pid = int(pid_text)
+                try:
+                    os.kill(pid, 0)
+                    logger.info(f"🔒 Singleton lock present and owned by PID {pid}; skipping scheduler startup in this worker")
+                    have_lock = False
+                except OSError:
+                    logger.info("🔁 Stale singleton lock found; taking lock for this process")
+                    lock_path.write_text(str(os.getpid()))
+                    have_lock = True
+            except Exception:
+                lock_path.write_text(str(os.getpid()))
+                have_lock = True
+        else:
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            lock_path.write_text(str(os.getpid()))
+            have_lock = True
     except Exception as e:
-        logger.error(f"❌ Failed to initialize scheduler: {e}")
-        # Don't fail startup; flask will still work
+        logger.warning(f"⚠️ Could not acquire singleton lock ({lock_path}): {e}. Proceeding to start scheduler in this worker.")
+        have_lock = True
+
+    # Start scheduler only if this process holds the lock
+    if have_lock:
+        try:
+            logger.info("\n⏰ Starting background scheduler...")
+            scheduler = start_scheduler(interval_hours=interval_hours, schedule_hour=schedule_hour, timezone_str=timezone_str, debug=False)
+            logger.info("✅ Scheduler initialized")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize scheduler: {e}")
+            # Don't fail startup; flask will still work
 
     logger.info("\n" + "=" * 80)
     logger.info("✅ APPLICATION READY")
