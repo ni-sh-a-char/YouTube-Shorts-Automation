@@ -86,11 +86,11 @@ def generate_startup_short() -> dict:
         # Run the full pipeline
         result = generate_shorts_video()
         
-        # Restore original topic
-        if original_topic:
+        # Restore original topic (safe removal if it wasn't set)
+        if original_topic is not None:
             os.environ['TARGET_TOPIC'] = original_topic
         else:
-            del os.environ['TARGET_TOPIC']
+            os.environ.pop('TARGET_TOPIC', None)
         
         # Check result
         if result.get('status') == 'success':
