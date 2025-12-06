@@ -21,6 +21,7 @@ Usage:
 """
 
 import os
+import sys
 import logging
 import shutil
 import threading
@@ -34,11 +35,41 @@ from apscheduler.triggers.cron import CronTrigger
 import pytz
 from dotenv import load_dotenv
 
+# Fix UTF-8 encoding for Windows terminals
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 logger = logging.getLogger(__name__)
 
 # Global flag to prevent concurrent task runs
 _task_running = False
 _task_lock = threading.Lock()
+
+
+def _run_video_assembly_wrapper(queue, script_data, srt_path, thumbnail_path, title, output_file, timestamp):
+    """
+    Wrapper function for video assembly that can be pickled and run in a separate thread/process.
+    Runs the video assembly and puts result in queue.
+    """
+    try:
+        from scripts.video_editor import VideoEditor
+        ve = VideoEditor()
+        path = ve.create_shorts_video(
+            script_data=script_data,
+            captions_srt_path=srt_path,
+            thumbnail_path=thumbnail_path,
+            title=title,
+            output_file=output_file,
+            timestamp=timestamp
+        )
+        queue.put({'ok': True, 'path': path})
+    except Exception as exc:
+        import traceback
+        queue.put({'ok': False, 'error': str(exc), 'trace': traceback.format_exc()})
 
 # Load environment variables
 load_dotenv()
@@ -113,6 +144,17 @@ def generate_shorts_video():
                 return {'status': 'skipped', 'message': 'Insufficient disk space'}
         except Exception as disk_e:
             logger.warning(f"⚠️ Could not determine disk usage: {disk_e}")
+        
+        # Memory check (important for 512MB Render tier)
+        try:
+            import psutil
+            mem = psutil.virtual_memory()
+            free_mem_mb = mem.available // (1024 * 1024)
+            logger.info(f"🧠 Available memory: {free_mem_mb} MB (total: {mem.total // (1024**3)} GB)")
+            if free_mem_mb < 100:
+                logger.warning(f"⚠️  Low memory warning: only {free_mem_mb} MB available. Video assembly may be slow.")
+        except Exception:
+            pass  # psutil not installed, skip memory check
     
         # Import modules here to allow for better error handling
         from scripts.config import get_config
@@ -212,57 +254,42 @@ def generate_shorts_video():
             'visual_cues': visual_cues
         }
 
-        # Run video assembly in a separate process with a timeout to avoid
+        # Run video assembly in a separate thread with a timeout to avoid
         # blocking the worker indefinitely (MoviePy can be long-running).
-        import multiprocessing
-        import traceback
+        import queue
 
-        def _run_video_assembly(q, script_data, srt_path, thumbnail_path, title, output_file, timestamp):
-            try:
-                ve = VideoEditor()
-                path = ve.create_shorts_video(
-                    script_data=script_data,
-                    captions_srt_path=srt_path,
-                    thumbnail_path=thumbnail_path,
-                    title=title,
-                    output_file=output_file,
-                    timestamp=timestamp
-                )
-                q.put({'ok': True, 'path': path})
-            except Exception as exc:
-                q.put({'ok': False, 'error': str(exc), 'trace': traceback.format_exc()})
-
-        logger.info("🎬 Starting video composition (slides, audio, captions...) in worker process")
-        q: multiprocessing.Queue = multiprocessing.Queue()
+        logger.info("🎬 Starting video composition (slides, audio, captions...) in worker thread")
+        result_queue = queue.Queue()
         output_file = f"output/shorts/video_{timestamp}.mp4"
-        p = multiprocessing.Process(
-            target=_run_video_assembly,
-            args=(q, script_data, srt_path, thumbnail_path, idea.get('title'), output_file, timestamp),
-            name=f"video_assembly_{timestamp}"
+        
+        # Use threading instead of multiprocessing for better Windows compatibility
+        thread = threading.Thread(
+            target=_run_video_assembly_wrapper,
+            args=(result_queue, script_data, srt_path, thumbnail_path, idea.get('title'), output_file, timestamp),
+            name=f"video_assembly_{timestamp}",
+            daemon=False
         )
-        p.start()
+        thread.start()
 
-        # Configurable timeout (seconds)
-        timeout_sec = int(os.getenv('VIDEO_ASSEMBLY_TIMEOUT_SEC', '300'))
-        logger.info(f"⏱️ Video assembly timeout set to {timeout_sec}s")
+        # Configurable timeout (seconds) - default 600s (10 min) accounts for 512MB Render tier
+        # Local run took ~4m40s, so 10min gives 2x safety margin for slower hardware
+        timeout_sec = int(os.getenv('VIDEO_ASSEMBLY_TIMEOUT_SEC', '600'))
+        logger.info(f"⏱️ Video assembly timeout set to {timeout_sec}s (~{timeout_sec//60}m)")
+        logger.info(f"   (Local benchmark: ~4m40s; 512MB Render tier may need more time)")
 
-        p.join(timeout=timeout_sec)
-        if p.is_alive():
-            logger.error(f"❌ Video assembly exceeded timeout of {timeout_sec}s; terminating process")
-            try:
-                p.terminate()
-            except Exception:
-                logger.exception("Failed to terminate video assembly process")
+        thread.join(timeout=timeout_sec)
+        if thread.is_alive():
+            logger.error(f"❌ Video assembly exceeded timeout of {timeout_sec}s")
             raise RuntimeError(f"Video assembly exceeded timeout of {timeout_sec}s")
 
         # Read result from queue
         try:
-            result = q.get_nowait() if not q.empty() else None
+            result = result_queue.get_nowait() if not result_queue.empty() else None
         except Exception:
             result = None
 
         if not result:
-            logger.error("❌ Video assembly process finished without returning a result")
+            logger.error("❌ Video assembly thread finished without returning a result")
             raise RuntimeError("Video assembly failed with no result")
 
         if not result.get('ok'):

@@ -49,6 +49,7 @@ pytz>=2023.3                        # Timezone support for scheduling
 # ============================================================================
 python-dateutil>=2.8.2              # Date/time utilities
 gunicorn>=21.0.0                    # Production WSGI server (for Render)
+psutil>=5.9.0                       # System resource monitoring (CPU, memory)
 
 # ============================================================================
 # Optional Dependencies (uncomment as needed)

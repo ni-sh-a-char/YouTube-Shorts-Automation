@@ -1,8 +1,18 @@
 # FILE: scripts/short_script_creator.py
 # Convert viral ideas into optimized YouTube Shorts scripts
 
+import sys
 import json
 from typing import Dict, Any, Optional
+
+# Fix UTF-8 encoding for Windows terminals
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 from src.llm import generate as llm_generate
 from scripts.config import get_config
 from scripts.utils import extract_keywords

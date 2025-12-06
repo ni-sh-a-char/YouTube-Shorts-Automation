@@ -14,10 +14,19 @@ Usage:
 """
 
 import os
+import sys
 import logging
 from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
+
+# Fix UTF-8 encoding for Windows terminals
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
 
 logger = logging.getLogger(__name__)
 
