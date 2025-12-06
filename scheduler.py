@@ -259,6 +259,15 @@ def generate_shorts_video():
         import queue
 
         logger.info("🎬 Starting video composition (slides, audio, captions...) in worker thread")
+        
+        # Notify health check that we're starting heavy processing
+        # This prevents Render from killing the container during video assembly
+        try:
+            from keep_alive import set_processing_state
+            set_processing_state(True, 'Video Assembly')
+        except Exception as e:
+            logger.warning(f"⚠️ Could not update health check state: {e}")
+        
         result_queue = queue.Queue()
         output_file = f"output/shorts/video_{timestamp}.mp4"
         
@@ -278,6 +287,14 @@ def generate_shorts_video():
         logger.info(f"   (Local benchmark: ~4m40s; 512MB Render tier may need more time)")
 
         thread.join(timeout=timeout_sec)
+        
+        # Clear processing state once assembly completes (success or timeout)
+        try:
+            from keep_alive import set_processing_state
+            set_processing_state(False)
+        except Exception:
+            pass
+        
         if thread.is_alive():
             logger.error(f"❌ Video assembly exceeded timeout of {timeout_sec}s")
             raise RuntimeError(f"Video assembly exceeded timeout of {timeout_sec}s")
@@ -302,6 +319,14 @@ def generate_shorts_video():
         
         # Step 7: Upload to YouTube
         logger.info("\n[7/7] Uploading to YouTube...")
+        
+        # Notify health check that we're uploading (still processing but different phase)
+        try:
+            from keep_alive import set_processing_state
+            set_processing_state(True, 'YouTube Upload')
+        except Exception:
+            pass
+        
         # Upload helper lives in src.uploader
         from src.uploader import upload_to_youtube
         
@@ -383,7 +408,13 @@ def generate_shorts_video():
             'timestamp': datetime.now().strftime("%Y%m%d_%H%M%S")
         }
     finally:
-        # Always release the lock
+        # Always clear processing state and release the lock
+        try:
+            from keep_alive import set_processing_state
+            set_processing_state(False)
+        except Exception:
+            pass
+        
         try:
             if os.getenv('CLEANUP_OUTPUT_AFTER_UPLOAD', 'true').lower() in ('true', '1', 'yes'):
                 # Best-effort cleanup to free space between runs

@@ -4,6 +4,9 @@ keep_alive.py - Lightweight Flask server to keep the app alive on Render
 This module creates a simple HTTP server that responds to UptimeRobot pings.
 Render will suspend free-tier apps if no HTTP traffic is detected.
 
+The health check endpoints report on video generation status so that
+Render doesn't restart the container during processing.
+
 Usage:
     from keep_alive import run
     run()  # Starts server on port 8080
@@ -22,21 +25,48 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
+# Global processing state (set by scheduler during video generation)
+_processing_state = {
+    'is_processing': False,
+    'current_task': None,
+    'start_time': None
+}
 
-@app.route('/', methods=['GET'])
+
+def set_processing_state(is_processing, task_name=None):
+    """Update the global processing state."""
+    global _processing_state
+    _processing_state['is_processing'] = is_processing
+    _processing_state['current_task'] = task_name
+    if is_processing and task_name:
+        from datetime import datetime
+        _processing_state['start_time'] = datetime.now().isoformat()
+    elif not is_processing:
+        _processing_state['start_time'] = None
+
+
+@app.route('/', methods=['GET', 'HEAD'])
 def health_check():
-    """Health check endpoint for UptimeRobot or load balancers."""
-    return {
+    """
+    Health check endpoint for UptimeRobot or load balancers.
+    
+    Returns 200 even during video processing to prevent container restart.
+    """
+    response_data = {
         'status': 'alive',
         'service': 'YouTube Shorts Automation',
         'message': 'Server is running on Render'
-    }, 200
+    }
+    
+    if _processing_state['is_processing']:
+        response_data['status'] = 'processing'
+        response_data['current_task'] = _processing_state['current_task']
+        response_data['message'] = f"Currently processing: {_processing_state['current_task']}"
+    
+    return response_data, 200
 
 
 @app.route('/api/health', methods=['GET'])
-def api_health():
-    """Alternative health endpoint."""
-    return {'status': 'ok'}, 200
 
 
 @app.errorhandler(404)
