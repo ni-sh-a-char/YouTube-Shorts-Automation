@@ -126,9 +126,15 @@ def initialize_app():
     if have_lock:
         logger.info("\n" + "=" * 80)
         try:
-            t = threading.Thread(target=run_startup_verification_if_enabled, name="startup_verifier", daemon=True)
+            import time
+            def delayed_startup():
+                logger.info("⏳ Waiting 30s for server stabilization before startup checks...")
+                time.sleep(30)
+                run_startup_verification_if_enabled()
+
+            t = threading.Thread(target=delayed_startup, name="startup_verifier", daemon=True)
             t.start()
-            logger.info("🔁 Startup verification launched in background thread (non-blocking)")
+            logger.info("🔁 Startup verification launched in background thread (non-blocking, 30s delay)")
         except Exception as e:
             logger.warning(f"⚠️ Could not start startup verifier thread: {e}")
         logger.info("=" * 80)

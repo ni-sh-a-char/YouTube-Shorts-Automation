@@ -97,6 +97,8 @@ def generate_startup_short() -> dict:
         # Import here to avoid circular dependencies
         from scheduler import generate_shorts_video
         
+        logger.info("⚠️  MEMORY WARNING: Video generation is intensive. If this crashes, upgrade RAM.")
+        
         # Override topic temporarily for verification
         topic = os.getenv('STARTUP_VERIFICATION_TOPIC', 'Verification Test - System Online')
         original_topic = os.getenv('TARGET_TOPIC')

@@ -396,7 +396,7 @@ def create_video(slide_paths, audio_paths, output_path, video_type):
             audio_codec="aac",
             audio_bitrate="192k",
             preset="medium",
-            threads=4,
+            threads=1,
             logger=None # Reduce noise
         )
         print(f"✅ {video_type.capitalize()} video created successfully!")
@@ -406,3 +406,19 @@ def create_video(slide_paths, audio_paths, output_path, video_type):
         import traceback
         traceback.print_exc()
         raise
+    finally:
+        # Explicit cleanup to free memory on Render
+        try:
+            if 'final_video' in locals(): final_video.close()
+            if 'full_audio' in locals(): full_audio.close()
+            if 'bg_music' in locals() and 'bg_music' in vars(): bg_music.close() # vars check for safety
+            
+            # Close all individual clips
+            if 'audio_clips' in locals():
+                for a in audio_clips: a.close()
+            if 'visual_clips' in locals():
+                for v in visual_clips: v.close()
+                
+            print("🧹 Released video resources")
+        except Exception as cleanup_error:
+            print(f"⚠️ Warning during cleanup: {cleanup_error}")
