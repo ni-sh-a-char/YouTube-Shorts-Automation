@@ -42,7 +42,6 @@ from scheduler import start_scheduler, stop_scheduler
 
 # Import startup verifier
 from scripts.startup_verifier import run_startup_verification_if_enabled
-import threading
 
 # Global scheduler reference
 scheduler = None
@@ -101,7 +100,20 @@ def initialize_app():
         logger.warning(f"⚠️ Could not acquire singleton lock ({lock_path}): {e}. Proceeding to start scheduler in this worker.")
         have_lock = True
 
-    # Start scheduler only if this process holds the lock
+    # Run startup verification FIRST (BLOCKING) if this process holds the lock
+    # This ensures any test video completes and uploads BEFORE the scheduler starts
+    if have_lock:
+        logger.info("\n" + "=" * 80)
+        logger.info("🔍 STARTUP SEQUENCE: Running verification BEFORE scheduler starts")
+        logger.info("=" * 80)
+        try:
+            run_startup_verification_if_enabled()
+        except Exception as e:
+            logger.warning(f"⚠️ Startup verification error (scheduler will still start): {e}")
+        logger.info("=" * 80)
+    
+    # Start scheduler ONLY if this process holds the lock (only one worker should run it)
+    # This runs AFTER startup verification completes
     if have_lock:
         try:
             logger.info("\n⏰ Starting background scheduler...")
@@ -122,25 +134,9 @@ def initialize_app():
         logger.info(f"⏰ Scheduler running: videos every {interval_hours} hours")
     logger.info("=" * 80)
 
-    # Run startup verification ONLY if this process holds the lock (only one worker should run it)
-    if have_lock:
+    if not have_lock:
         logger.info("\n" + "=" * 80)
-        try:
-            import time
-            def delayed_startup():
-                logger.info("⏳ Waiting 30s for server stabilization before startup checks...")
-                time.sleep(30)
-                run_startup_verification_if_enabled()
-
-            t = threading.Thread(target=delayed_startup, name="startup_verifier", daemon=True)
-            t.start()
-            logger.info("🔁 Startup verification launched in background thread (non-blocking, 30s delay)")
-        except Exception as e:
-            logger.warning(f"⚠️ Could not start startup verifier thread: {e}")
-        logger.info("=" * 80)
-    else:
-        logger.info("\n" + "=" * 80)
-        logger.info("⏭️  Skipping startup verification in this worker (not the lock holder)")
+        logger.info("⏭️  This worker doesn't hold the singleton lock - skipping scheduler and verification")
         logger.info("=" * 80)
 
 
