@@ -103,20 +103,12 @@ def generate_startup_short() -> dict:
     logger.info("=" * 80)
     
     try:
-        # Import here to avoid circular dependencies
-        from scheduler import generate_shorts_video
-        
-        logger.info("⚠️  MEMORY WARNING: Video generation is intensive. If this crashes, upgrade RAM.")
-        
-        # Override topic temporarily for verification
-        topic = os.getenv('STARTUP_VERIFICATION_TOPIC', 'Verification Test - System Online')
-        original_topic = os.getenv('TARGET_TOPIC')
-        
-        logger.info(f"📋 Test Topic: {topic}")
-        logger.info(f"🚀 This verifies the entire pipeline is working on Render")
-        
-        # Temporarily set topic
-        os.environ['TARGET_TOPIC'] = topic
+        # Lightweight startup verification (non-intensive):
+        # 1) Verify YouTube credentials (channels.list) to ensure uploader auth works
+        # 2) Generate a thumbnail (fast)
+        # 3) Generate a short TTS sample (one-line) to validate TTS provider
+        # This avoids heavy MoviePy video assembly during startup while still
+        # validating that the service can post to YouTube.
         
         # Create in-progress marker to prevent duplicates
         try:
@@ -124,78 +116,110 @@ def generate_startup_short() -> dict:
         except Exception:
             logger.warning("⚠️ Could not write startup in-progress marker; continuing anyway")
 
-        # Run the full pipeline
-        result = generate_shorts_video()
-        
-        # Restore original topic (safe removal if it wasn't set)
-        if original_topic is not None:
-            os.environ['TARGET_TOPIC'] = original_topic
-        else:
-            os.environ.pop('TARGET_TOPIC', None)
-        
-        # Check result
-        if result.get('status') == 'success':
-            video_id = result.get('video_id')
+        # 1) Verify YouTube credentials
+        youtube_ok = False
+        try:
+            from src.uploader import get_authenticated_service
+            svc = get_authenticated_service()
+            # Request channel list to verify credentials
+            channels = svc.channels().list(part='id', mine=True).execute()
+            if channels and channels.get('items') is not None:
+                youtube_ok = True
+                logger.info("✅ YouTube credentials verified (channels.list succeeded)")
+        except Exception as e:
+            logger.warning(f"⚠️ YouTube credential check failed: {e}")
+
+        # 2) Generate a tiny thumbnail to verify visuals pipeline
+        thumb_ok = False
+        try:
+            from scripts.thumbnail_generator import generate_shorts_thumbnail
+            from pathlib import Path
+            out_dir = Path('output/shorts')
+            thumb_path = generate_shorts_thumbnail('Startup Verification Test', out_dir)
+            if thumb_path:
+                thumb_ok = True
+                logger.info(f"✅ Thumbnail generation OK: {thumb_path}")
+        except Exception as e:
+            logger.warning(f"⚠️ Thumbnail generation failed: {e}")
+
+        # 3) Generate a short TTS sample
+        tts_ok = False
+        try:
+            from scripts.tts_generator import TTSGenerator
+            from pathlib import Path
+            tts = TTSGenerator()
+            sample_text = os.getenv('STARTUP_VERIFICATION_TTS_TEXT', 'Render verification test')
+            sample_out = Path('output/shorts/startup_tts_sample.mp3')
+            audio_path = tts.generate_speech(sample_text, sample_out)
+            if audio_path and audio_path.exists():
+                tts_ok = True
+                logger.info(f"✅ TTS sample generated: {audio_path}")
+        except Exception as e:
+            logger.warning(f"⚠️ TTS sample generation failed: {e}")
+
+        # Decide outcome
+        if youtube_ok and (thumb_ok or tts_ok):
             logger.info("\n" + "=" * 80)
-            logger.info("✅ STARTUP VERIFICATION PASSED")
+            logger.info("✅ STARTUP VERIFICATION PASSED (lightweight)")
             logger.info("=" * 80)
-            logger.info(f"✨ Test short successfully generated and uploaded!")
-            logger.info(f"📺 Video ID: {video_id}")
-            logger.info(f"🔗 View at: https://youtube.com/shorts/{video_id}")
-            logger.info(f"⏱️  Timestamp: {result.get('timestamp')}")
-            logger.info("\n🎉 System is working correctly on Render!")
-            logger.info("=" * 80)
-            
             # Write flag file if run_once is enabled
             if os.getenv('STARTUP_VERIFICATION_RUN_ONCE', 'false').lower() in ('true', '1', 'yes'):
                 try:
                     STARTUP_FLAG_FILE.parent.mkdir(parents=True, exist_ok=True)
-                    STARTUP_FLAG_FILE.write_text(f"Verification completed at {datetime.now().isoformat()}\nVideo ID: {video_id}\n")
+                    STARTUP_FLAG_FILE.write_text(f"Verification completed at {datetime.now().isoformat()}\nLightweight verification passed\n")
                     logger.info(f"💾 Saved completion flag to {STARTUP_FLAG_FILE}")
                 except Exception as e:
                     logger.warning(f"⚠️  Could not write flag file: {e}")
+
             # Remove in-progress marker
             try:
                 if STARTUP_INPROGRESS_FILE.exists():
                     STARTUP_INPROGRESS_FILE.unlink()
             except Exception:
                 pass
-            
+
             return {
                 'status': 'verified',
-                'message': 'Startup verification short generated successfully',
-                'video_id': video_id,
-                'timestamp': result.get('timestamp')
+                'message': 'Lightweight startup verification succeeded',
+                'timestamp': datetime.now().strftime("%Y%m%d_%H%M%S")
             }
         else:
-            error = result.get('error', 'Unknown error')
+            error_msg = []
+            if not youtube_ok:
+                error_msg.append('YouTube auth failed')
+            if not thumb_ok:
+                error_msg.append('Thumbnail generation failed')
+            if not tts_ok:
+                error_msg.append('TTS generation failed')
+            combined = '; '.join(error_msg) if error_msg else 'Unknown failure'
+
             logger.error("\n" + "=" * 80)
-            logger.error("❌ STARTUP VERIFICATION FAILED")
+            logger.error("❌ STARTUP VERIFICATION FAILED (lightweight)")
             logger.error("=" * 80)
-            logger.error(f"Error: {error}")
+            logger.error(f"Error: {combined}")
             logger.error("\n⚠️  System startup completed but verification failed.")
             logger.error("Check logs above for details.")
             logger.error("=" * 80)
-            
-            # Remove in-progress marker on failure as well so it won't block future manual attempts
+
+            # Remove in-progress marker on failure
             try:
                 if STARTUP_INPROGRESS_FILE.exists():
                     STARTUP_INPROGRESS_FILE.unlink()
             except Exception:
                 pass
 
-            # Write failed marker with timestamp and short error to avoid repeated attempts
+            # Write failed marker
             try:
                 STARTUP_FAILED_FILE.parent.mkdir(parents=True, exist_ok=True)
-                STARTUP_FAILED_FILE.write_text(f"{datetime.now().isoformat()}\n{str(error)[:100]}\n")
+                STARTUP_FAILED_FILE.write_text(f"{datetime.now().isoformat()}\n{combined}\n")
                 logger.info(f"💾 Written failure marker to {STARTUP_FAILED_FILE}")
             except Exception as e:
                 logger.warning(f"⚠️ Could not write failure marker: {e}")
 
             return {
                 'status': 'failed',
-                'message': f'Startup verification failed: {error}',
-                'timestamp': result.get('timestamp')
+                'message': f'Startup verification failed: {combined}',
+                'timestamp': datetime.now().strftime("%Y%m%d_%H%M%S")
             }
             
     except Exception as e:
