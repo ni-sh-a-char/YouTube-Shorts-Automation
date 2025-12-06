@@ -1,5 +1,36 @@
 # 🚀 Render Deployment Guide - YouTube Shorts Automation
 
+## ⚠️ CRITICAL: Uptime Monitoring & Container Restarts
+
+**If you're using Pulsetic or similar uptime monitoring, IMPORTANT:**
+
+### The Problem
+- Uptime monitors (Pulsetic) ping your app every 30-60 seconds to keep it alive
+- During video assembly (~5-10 minutes), these pings can trigger Render to restart the container
+- This kills the video assembly process before it completes
+- Result: Infinite restart loop, no videos uploaded
+
+### The Solution (Pick ONE)
+
+#### Option A: Disable Startup Verification (RECOMMENDED)
+1. In Render Environment Variables, set: `STARTUP_VERIFICATION=false`
+2. Redeploy
+3. Scheduler will generate first video at 12:00 Asia/Kolkata (no startup test)
+4. **Result:** No long-running startup process → no restart conflicts
+
+#### Option B: Configure Pulsetic Correctly
+1. Set ping interval to **5-10 minutes** (not 30 seconds)
+2. This gives video assembly time to complete between health checks
+3. Keep `STARTUP_VERIFICATION=true` if you want startup testing
+
+#### Option C: Disable Uptime Monitoring Temporarily
+- Disable Pulsetic until first scheduled run completes (12:00 Asia/Kolkata)
+- Re-enable after initial deployment is stable
+
+**Recommended:** Use **Option A** (disable startup verification) for initial deployment.
+
+---
+
 ## ⏱️ Timeline & Performance Expectations
 
 This guide provides timing expectations for the 512MB Render tier based on local benchmarking.
