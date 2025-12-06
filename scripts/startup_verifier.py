@@ -102,6 +102,14 @@ def generate_startup_short() -> dict:
     logger.info("🔍 STARTUP VERIFICATION: Generating test short...")
     logger.info("=" * 80)
     
+    # If full startup upload is explicitly requested, run the full (but minimal) upload.
+    if os.getenv('STARTUP_VERIFICATION_FULL', 'false').lower() in ('true', '1', 'yes'):
+        try:
+            logger.info("🔔 STARTUP_VERIFICATION_FULL=true: running full minimal upload test")
+            return _perform_full_startup_upload()
+        except Exception as e:
+            logger.warning(f"⚠️ Full startup upload failed, falling back to lightweight checks: {e}")
+
     try:
         # Lightweight startup verification (non-intensive):
         # 1) Verify YouTube credentials (channels.list) to ensure uploader auth works
@@ -278,6 +286,150 @@ def generate_startup_short() -> dict:
             'message': f'Startup verification exception: {str(e)}',
             'timestamp': datetime.now().strftime("%Y%m%d_%H%M%S")
         }
+
+
+    def _perform_full_startup_upload() -> dict:
+        """Perform a minimal full upload on startup.
+
+        This builds a very short (configurable) video, uploads it to YouTube, and
+        writes the success flag so it won't run again if `STARTUP_VERIFICATION_RUN_ONCE`
+        is enabled. The video is intentionally minimal to reduce runtime and memory.
+        """
+        from pathlib import Path
+        from datetime import datetime as dt
+
+        # Ensure markers
+        try:
+            STARTUP_INPROGRESS_FILE.write_text(f"started:{datetime.now().isoformat()}\n")
+        except Exception:
+            pass
+
+        # Load small-duration for startup test
+        duration = int(os.getenv('STARTUP_VERIFICATION_FULL_DURATION_SEC', '6'))
+        timestamp = dt.now().strftime('%Y%m%d_%H%M%S')
+
+        # Prepare minimal script_data
+        script_text = os.getenv('STARTUP_VERIFICATION_FULL_TEXT', 'Quick startup verification. [PAUSE]')
+        script_data = {
+            'script': script_text,
+            'duration_seconds': duration,
+            'visual_cues': [
+                {'time_seconds': 0, 'duration_seconds': duration, 'type': 'text', 'content': 'Startup verification'}
+            ]
+        }
+
+        out_dir = Path('output/shorts')
+        out_dir.mkdir(parents=True, exist_ok=True)
+        srt_path = out_dir / f'captions_{timestamp}.srt'
+
+        # Write very small srt
+        try:
+            srt_text = '1\n00:00:00,000 --> 00:00:0{} ,000\n{}\n\n'.format(min(duration,9), script_text.replace('[PAUSE]',''))
+            srt_path.write_text(srt_text)
+        except Exception:
+            srt_path = None
+
+        # Generate thumbnail
+        thumb_path = None
+        try:
+            from scripts.thumbnail_generator import generate_shorts_thumbnail
+            thumb_path = generate_shorts_thumbnail('Startup Verification', out_dir)
+        except Exception:
+            thumb_path = None
+
+        # Generate TTS sample using existing TTS generator; VideoEditor will also try
+        try:
+            from scripts.tts_generator import TTSGenerator
+            tts = TTSGenerator()
+            audio_out = out_dir / f'startup_audio_{timestamp}.mp3'
+            audio_path = tts.generate_speech(script_text, audio_out)
+        except Exception:
+            audio_path = None
+
+        # Build output video path
+        output_file = str(out_dir / f'video_startup_{timestamp}.mp4')
+
+        # Notify health state
+        try:
+            from keep_alive import set_processing_state
+            set_processing_state(True, 'Startup Full Upload')
+        except Exception:
+            pass
+
+        video_path = None
+        try:
+            # Reuse VideoEditor to assemble a minimal video
+            from scripts.video_editor import VideoEditor
+            ve = VideoEditor()
+            video_path = ve.create_shorts_video(
+                script_data=script_data,
+                captions_srt_path=str(srt_path) if srt_path and srt_path.exists() else None,
+                thumbnail_path=str(thumb_path) if thumb_path else None,
+                title=os.getenv('STARTUP_VERIFICATION_FULL_TITLE', 'Startup Verification Test'),
+                output_file=output_file,
+                timestamp=timestamp
+            )
+        except Exception as e:
+            logger.error(f"❌ Full startup video assembly failed: {e}")
+
+        # Attempt upload if video created
+        video_id = None
+        if video_path:
+            try:
+                from src.uploader import upload_to_youtube, generate_metadata_from_script
+                meta = generate_metadata_from_script(script_data, topic=os.getenv('TARGET_TOPIC', 'startup'))
+                video_id = upload_to_youtube(video_path, meta['title'], meta['description'], meta['tags'], thumbnail_path=str(thumb_path) if thumb_path else None)
+                logger.info(f"✅ Startup short uploaded: {video_id}")
+            except Exception as e:
+                logger.error(f"❌ Startup upload failed: {e}")
+
+        # Clear health state
+        try:
+            from keep_alive import set_processing_state
+            set_processing_state(False)
+        except Exception:
+            pass
+
+        # Finalize
+        if video_id:
+            # Write flag file if run_once is enabled
+            if os.getenv('STARTUP_VERIFICATION_RUN_ONCE', 'false').lower() in ('true', '1', 'yes'):
+                try:
+                    STARTUP_FLAG_FILE.parent.mkdir(parents=True, exist_ok=True)
+                    STARTUP_FLAG_FILE.write_text(f"Verification completed at {datetime.now().isoformat()}\nVideo ID: {video_id}\n")
+                except Exception:
+                    pass
+
+            try:
+                if STARTUP_INPROGRESS_FILE.exists():
+                    STARTUP_INPROGRESS_FILE.unlink()
+            except Exception:
+                pass
+
+            # Cleanup outputs if desired
+            try:
+                if os.getenv('CLEANUP_OUTPUT_AFTER_UPLOAD', 'true').lower() in ('true', '1', 'yes'):
+                    from scheduler import cleanup_output_folder
+                    cleanup_output_folder('output/shorts')
+            except Exception:
+                pass
+
+            return {'status': 'success', 'video_id': video_id, 'timestamp': timestamp}
+
+        # If we reach here, failed
+        try:
+            STARTUP_FAILED_FILE.parent.mkdir(parents=True, exist_ok=True)
+            STARTUP_FAILED_FILE.write_text(f"{datetime.now().isoformat()}\nFull startup upload failed\n")
+        except Exception:
+            pass
+
+        try:
+            if STARTUP_INPROGRESS_FILE.exists():
+                STARTUP_INPROGRESS_FILE.unlink()
+        except Exception:
+            pass
+
+        return {'status': 'failed', 'message': 'Full startup upload failed', 'timestamp': timestamp}
 
 
 def run_startup_verification_if_enabled():
