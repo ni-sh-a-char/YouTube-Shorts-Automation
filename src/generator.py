@@ -4,6 +4,7 @@
 import os
 import json
 import requests
+import gc
 from io import BytesIO
 from src.llm import generate as llm_generate
 from gtts import gTTS
@@ -22,6 +23,16 @@ FONT_FILE = ASSETS_PATH / "fonts/arial.ttf"
 BACKGROUND_MUSIC_PATH = ASSETS_PATH / "music/bg_music.mp3"
 FALLBACK_THUMBNAIL_FONT = ImageFont.load_default()
 YOUR_NAME = "ni_sh_a.char"
+IS_RENDER = os.getenv('RENDER') is not None
+
+# Adjust resolution for Render's 512MB limit
+if IS_RENDER:
+    # 720p is lighter on RAM (approx 45% of 1080p pixel count)
+    SHORT_WIDTH, SHORT_HEIGHT = 720, 1280
+    LONG_WIDTH, LONG_HEIGHT = 1280, 720
+else:
+    SHORT_WIDTH, SHORT_HEIGHT = 1080, 1920
+    LONG_WIDTH, LONG_HEIGHT = 1920, 1080
 
 # GitHub Actions compatibility for ImageMagick
 if os.name == 'posix':
@@ -136,7 +147,7 @@ def generate_visuals(output_dir, video_type, slide_content=None, thumbnail_title
     output_dir.mkdir(exist_ok=True, parents=True)
     is_thumbnail = thumbnail_title is not None
 
-    width, height = (1920, 1080) if video_type == 'long' else (1080, 1920)
+    width, height = (LONG_WIDTH, LONG_HEIGHT) if video_type == 'long' else (SHORT_WIDTH, SHORT_HEIGHT)
     title = thumbnail_title if is_thumbnail else slide_content.get("title", "")
     bg_image = get_pexels_image(title, video_type)
 
@@ -159,15 +170,22 @@ def generate_visuals(output_dir, video_type, slide_content=None, thumbnail_title
     if is_thumbnail and video_type == 'long':
         w, h = final_bg.size
         if h > w:
-            print("⚠️ Detected vertical thumbnail for long video. Rotating and resizing to 1920x1080...")
-            final_bg = final_bg.transpose(Image.ROTATE_270).resize((1920, 1080))
+            print("⚠️ Detected vertical thumbnail for long video. Rotating and resizing...")
+            final_bg = final_bg.transpose(Image.ROTATE_270).resize((width, height))
 
     draw = ImageDraw.Draw(final_bg)
 
     try:
-        title_font = ImageFont.truetype(str(FONT_FILE), 80 if video_type == 'long' else 90)
-        content_font = ImageFont.truetype(str(FONT_FILE), 45 if video_type == 'long' else 55)
-        footer_font = ImageFont.truetype(str(FONT_FILE), 25 if video_type == 'long' else 35)
+        # Scale fonts slightly based on resolution
+        scale_factor = width / 1080.0 if video_type == 'short' else width / 1920.0
+        
+        title_size = int((80 if video_type == 'long' else 90) * scale_factor)
+        content_size = int((45 if video_type == 'long' else 55) * scale_factor)
+        footer_size = int((25 if video_type == 'long' else 35) * scale_factor)
+
+        title_font = ImageFont.truetype(str(FONT_FILE), title_size)
+        content_font = ImageFont.truetype(str(FONT_FILE), content_size)
+        footer_font = ImageFont.truetype(str(FONT_FILE), footer_size)
     except IOError:
         title_font = content_font = footer_font = FALLBACK_THUMBNAIL_FONT
 
@@ -274,8 +292,11 @@ def get_pexels_video(query, orientation='portrait'):
     return None
 
 
-def create_caption_clips(script_text, duration, size=(1080, 1920)):
+def create_caption_clips(script_text, duration, size=None):
     """Generates subtitle clips using PIL (no ImageMagick)."""
+    # Default to current global short size if not provided
+    if size is None:
+        size = (SHORT_WIDTH, SHORT_HEIGHT)
     # Simple word-level timestamping (linear interpolation)
     words = script_text.replace('[PAUSE]', '').split()
     if not words:
@@ -284,7 +305,10 @@ def create_caption_clips(script_text, duration, size=(1080, 1920)):
     word_duration = duration / len(words)
     clips = []
     
-    font_size = 80
+    clips = []
+    
+    # Scale font
+    font_size = int(80 * (size[0] / 1080.0))
     try:
         font = ImageFont.truetype(str(FONT_FILE), font_size)
     except:
@@ -327,6 +351,9 @@ def create_caption_clips(script_text, duration, size=(1080, 1920)):
 def create_video(slide_paths, audio_paths, output_path, video_type):
     """Creates a final video from slides/videos and audio."""
     print(f"🎬 Creating {video_type} video...")
+    
+    # Aggressive garbage collection
+    gc.collect()
     
     # Ensure numpy is imported for PIL->MoviePy conversion
     global np
@@ -394,8 +421,8 @@ def create_video(slide_paths, audio_paths, output_path, video_type):
             fps=24,
             codec="libx264",
             audio_codec="aac",
-            audio_bitrate="192k",
-            preset="medium",
+            audio_bitrate="128k" if IS_RENDER else "192k", # Lower bitrate for Render
+            preset="ultrafast" if IS_RENDER else "medium", # Faster encoding = less buffer time often
             threads=1,
             logger=None # Reduce noise
         )
