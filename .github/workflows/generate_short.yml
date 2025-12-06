@@ -38,7 +38,7 @@ jobs:
       - name: Install Python requirements
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install --no-cache-dir -r requirements.txt
 
       - name: Show environment (debug)
         run: |
@@ -52,7 +52,7 @@ jobs:
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          GROQ_API_URL: ${{ secrets.GROQ_API_URL }}
+          # GROQ_API_URL: ${{ secrets.GROQ_API_URL }}
           GROQ_MODEL: openai/gpt-oss-120b
           
           # === OPTIONAL: API Keys ===
