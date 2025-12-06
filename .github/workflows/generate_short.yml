@@ -2,17 +2,23 @@ name: Generate and Upload YouTube Short
 
 on:
   schedule:
-    - cron: "5 12 * * *"
-  workflow_dispatch:
+    # 9:00 AM IST  (03:30 UTC)
+    - cron: "30 3 * * *"
+    # 6:00 PM IST (12:30 UTC)
+    - cron: "30 12 * * *"
+  workflow_dispatch: {}
 
 jobs:
   generate-and-upload:
+    name: Generate and Upload YouTube Short
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
           python-version: "3.12"
 
@@ -28,25 +34,34 @@ jobs:
 
       - name: Run generation
         env:
-          # REQUIRED
+          # === REQUIRED SECRETS ===
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
 
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          GROQ_API_URL: ${{ secrets.GROQ_API_URL }}
-          GROQ_MODEL: openai/gpt-oss-120b
+          # GROQ_API_URL optional — do NOT define unless needed
+          # GROQ_API_URL: ${{ secrets.GROQ_API_URL }}
+          GROQ_MODEL: "openai/gpt-oss-120b"
 
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
-          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
-          TTSMAKER_API_KEY: ${{ secrets.TTSMAKER_API_KEY }}
+          # === OPTIONAL SECRETS ===
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || '' }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY || '' }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY || '' }}
+          TTSMAKER_API_KEY: ${{ secrets.TTSMAKER_API_KEY || '' }}
 
-          TARGET_TOPIC: ${{ secrets.TARGET_TOPIC }}
-          TOPICS_ROTATION: ${{ secrets.TOPICS_ROTATION }}
+          # === CONTENT CONFIG ===
+          TARGET_TOPIC: ${{ secrets.TARGET_TOPIC || 'Python' }}
+          TOPICS_ROTATION: ${{ secrets.TOPICS_ROTATION || 'Python,VS Code,Git,Docker,Linux' }}
+          CONTENT_NICHE: "tech/coding"
 
-          LLM_PROVIDER: groq
-          TTS_PROVIDER: gtts
+          # === MODEL / TTS ===
+          LLM_PROVIDER: "groq"
+          TTS_PROVIDER: "gtts"
+
+          # === SAFETY OVERRIDES ===
+          STARTUP_VERIFICATION: "false"
+          VIDEO_ASSEMBLY_TIMEOUT_SEC: "600"
         run: |
           python scripts/run_generate.py
 
