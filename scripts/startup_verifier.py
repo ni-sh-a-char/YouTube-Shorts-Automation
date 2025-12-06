@@ -199,6 +199,33 @@ def generate_startup_short() -> dict:
             }
             
     except Exception as e:
+        error_str = str(e).lower()
+        
+        # Check for rate limit errors - these are transient, not system failures
+        if 'rate limit' in error_str or '429' in error_str:
+            logger.warning("\n" + "=" * 80)
+            logger.warning("⚠️  STARTUP VERIFICATION SKIPPED: API Rate Limit Hit")
+            logger.warning("=" * 80)
+            logger.warning(f"Groq/LLM provider rate limit reached: {e}")
+            logger.warning("This is normal after many generations. Token limit resets daily.")
+            logger.warning("System will continue with scheduler. Next run will try again tomorrow.")
+            logger.warning("=" * 80)
+            
+            # Clean up in-progress marker
+            try:
+                if STARTUP_INPROGRESS_FILE.exists():
+                    STARTUP_INPROGRESS_FILE.unlink()
+            except Exception:
+                pass
+            
+            # Don't write failure marker for rate limits - let it retry tomorrow
+            return {
+                'status': 'skipped',
+                'message': 'Startup verification skipped: API rate limit (will retry tomorrow)',
+                'timestamp': datetime.now().strftime("%Y%m%d_%H%M%S")
+            }
+        
+        # For other exceptions, log and mark as failed
         logger.error("\n" + "=" * 80)
         logger.error("❌ STARTUP VERIFICATION ERROR")
         logger.error("=" * 80)
