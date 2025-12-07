@@ -57,7 +57,7 @@ class ShortScriptCreator:
             # Use the LLM adapter which supports both Gemini and Groq
             model_name = self.config.groq_model if self.config.llm_provider == 'groq' else self.config.gemini_model
             response = llm_generate(prompt, model=model_name)
-            script_data = self._parse_response(response.text, duration_seconds, idea)
+            script_data = self._parse_response(response.text, duration_seconds, idea, topic)
             return script_data
         except Exception as e:
             print(f"❌ ERROR: Failed to create script for idea '{idea.get('title')}': {e}")
@@ -183,6 +183,7 @@ Return only the JSON object. No commentary, no markdown, exact JSON shape reques
         response_text: str,
         duration_seconds: int,
         idea: Dict[str, Any] = None,
+        topic: str = None,
     ) -> Dict[str, Any]:
         """
         Parse Gemini response and extract script data.
@@ -214,8 +215,9 @@ Return only the JSON object. No commentary, no markdown, exact JSON shape reques
                 from scripts.code_utils import sanitize_script_for_topic, is_coding_topic, extract_code_markers
                 
                 script_text = script_data.get('script', '')
-                topic = idea.get('title', '') if (idea and isinstance(idea, dict)) else ''
-                is_coding = is_coding_topic(topic)
+                # Prefer explicit topic argument; fall back to idea title
+                resolved_topic = topic or (idea.get('title', '') if (idea and isinstance(idea, dict)) else '')
+                is_coding = is_coding_topic(resolved_topic)
                 
                 # Apply topic-aware sanitization
                 script_text = sanitize_script_for_topic(script_text, is_coding=is_coding)
@@ -225,10 +227,76 @@ Return only the JSON object. No commentary, no markdown, exact JSON shape reques
                 
                 # Extract code markers from visual cues (if present)
                 visual_cues = script_data.get('visual_cues', [])
+                code_snippets = []
                 if visual_cues:
-                    code_snippets = extract_code_markers(visual_cues)
-                    if code_snippets and is_coding:
-                        script_data['code_snippets'] = code_snippets
+                    code_snippets.extend(extract_code_markers(visual_cues))
+
+                # Also extract inline code blocks from the script itself (``` blocks or [CODE:...])
+                from scripts.code_utils import extract_code_snippets_from_script
+                inline_snips = extract_code_snippets_from_script(script_text, limit=3)
+                if inline_snips:
+                    code_snippets.extend(inline_snips)
+
+                # Heuristic: pick up short inline code patterns (e.g., "a, b = b, a")
+                if not code_snippets and is_coding:
+                    try:
+                        assign_matches = re.findall(r"[A-Za-z0-9_\[\]\(\),\s]+\s*=\s*[^\n\.;]{1,120}", script_text)
+                        # Clean and limit
+                        for m in assign_matches:
+                            s = m.strip()
+                            # Skip overly long or natural-language-like matches
+                            if len(s) > 3 and len(s) < 200 and any(ch in s for ch in ['=', '(', ')', '[', ']', ',']):
+                                code_snippets.append(s)
+                                if len(code_snippets) >= 3:
+                                    break
+                    except Exception:
+                        pass
+
+                # Deduplicate while preserving order
+                seen_cs = set()
+                deduped = []
+                import re as _re
+                for cs in code_snippets:
+                    raw = str(cs).strip()
+                    if not raw:
+                        continue
+                    # Try to extract a concise code-like substring (e.g., "a, b = b, a")
+                    m = _re.search(r"[A-Za-z0-9_\[\]\(\),\s]+\s*=\s*[^\n\.;]{1,200}", raw)
+                    if m:
+                        candidate = m.group(0).strip()
+                    else:
+                        # Fallback: look for common code tokens
+                        tokens = ['print', 'def ', 'lambda', '=>', '->', '=']
+                        idx = -1
+                        for t in tokens:
+                            i = raw.find(t)
+                            if i != -1:
+                                idx = i
+                                break
+                        if idx >= 0:
+                            start = max(0, idx - 20)
+                            end = min(len(raw), idx + 80)
+                            candidate = raw[start:end].strip()
+                        else:
+                            candidate = raw
+
+                    # Clean up common trailing filler phrases
+                    candidate = candidate.strip(" \"'.,;:)")
+                    # Remove leading [PAUSE] tokens or common leading words like 'Just', 'Write', 'Use'
+                    candidate = _re.sub(r"^\[PAUSE\]\s*", "", candidate, flags=_re.IGNORECASE)
+                    candidate = _re.sub(r"^(just\s+|write\s+|use\s+|try\s+)", "", candidate, flags=_re.IGNORECASE)
+                    # Remove leading 'in python,' noise
+                    candidate = _re.sub(r"^in\s+python[,:\s]+", "", candidate, flags=_re.IGNORECASE)
+                    for suffix in [' and go', ' and swap', ' and try', ' and use', ' and then', ' then go', ' then try']:
+                        if candidate.endswith(suffix):
+                            candidate = candidate[: -len(suffix)].strip()
+
+                    if candidate and candidate not in seen_cs:
+                        deduped.append(candidate)
+                        seen_cs.add(candidate)
+
+                if deduped and is_coding:
+                    script_data['code_snippets'] = deduped
                 
                 # Mark topic type for downstream processing
                 script_data['is_coding_topic'] = is_coding

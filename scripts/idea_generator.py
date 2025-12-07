@@ -71,10 +71,18 @@ class IdeaGenerator:
         # Enforce minimum 30 seconds
         duration = max(duration, 30)
 
-        # If the workspace/content should avoid coding, explicitly instruct the model
-        avoid_coding_instruction = (
-            "IMPORTANT: Do NOT include any code, code snippets, terminal output, IDE shots, or programming\ncommands. Create non-technical, general-audience ideas (e.g., lifestyle, productivity, finance, health,\ncreativity, quick tips) instead."
-        )
+        # If the topic appears to be non-coding, explicitly instruct the model to avoid code
+        try:
+            from scripts.code_utils import is_coding_topic
+            is_coding = is_coding_topic(topic)
+        except Exception:
+            is_coding = False
+
+        avoid_coding_instruction = ""
+        if not is_coding:
+            avoid_coding_instruction = (
+                "IMPORTANT: Do NOT include any code, code snippets, terminal output, IDE shots, or programming\ncommands. Create non-technical, general-audience ideas (e.g., lifestyle, productivity, finance, health,\ncreativity, quick tips) instead."
+            )
 
         return f"""You are a viral YouTube Shorts content creator.
 
