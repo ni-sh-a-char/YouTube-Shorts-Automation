@@ -172,22 +172,34 @@ def generate_shorts_video():
         setup_logging()
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        # Select topic: respect explicit TARGET_TOPIC unless it's set to 'random' or 'rotate'
+        # Select topic: enforce RANDOM rotation from TOPICS_ROTATION
+        # Only use TARGET_TOPIC if it's explicitly set to a specific topic (not 'random')
         env_topic = os.getenv('TARGET_TOPIC', '').strip()
+        
         if env_topic and env_topic.lower() not in ('', 'random', 'rotate'):
+            # User set explicit topic (e.g., TARGET_TOPIC=Python)
             topic = env_topic
+            logger.info(f"✅ Using explicit TARGET_TOPIC: {topic}")
         else:
-            # Use topics rotation from config if available, otherwise fall back to target_topic
+            # Force random selection from TOPICS_ROTATION
+            import random
             try:
                 topics = config.topics_rotation if config.topics_rotation else [config.target_topic]
             except Exception:
                 topics = [config.target_topic]
-            import random
+            
+            if not topics or len(topics) == 0:
+                topics = ['Productivity', 'Life Tips', 'Mental Health', 'Personal Finance']
+            
             topic = random.choice(topics).strip()
+            logger.info(f"🎲 Randomly selected topic from rotation: {topic}")
 
         duration = config.video_duration_seconds
-
-        logger.info(f"📋 Topic: {topic}")
+        
+        # Check if this is a coding topic and log it
+        from scripts.code_utils import is_coding_topic
+        is_coding = is_coding_topic(topic)
+        logger.info(f"📋 Topic: {topic} (Coding: {is_coding})")
         logger.info(f"⏱️  Duration: {duration} seconds")
         logger.info(f"🕐 Timestamp: {timestamp}")
         

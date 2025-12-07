@@ -12,6 +12,49 @@ import tempfile
 from src.generator import get_pexels_video, get_pexels_image
 
 
+def add_code_overlay(clip, code_text: str, duration: float = 2.0, position: Tuple[str, str] = ('center', 'bottom')):
+    """
+    Add code snippet as animated on-screen overlay.
+    
+    Args:
+        clip: Video clip to add overlay to
+        code_text: Code snippet to display
+        duration: Duration to show code (seconds)
+        position: Position tuple (x, y)
+        
+    Returns:
+        CompositeVideoClip with code overlay
+    """
+    if not code_text or not code_text.strip():
+        return clip
+    
+    try:
+        from scripts.code_utils import format_code_for_display
+        
+        # Format code for display (max 3 lines)
+        code_display = format_code_for_display(code_text, max_lines=3)
+        
+        # Create styled code clip
+        code_clip = TextClip(
+            code_display,
+            fontsize=24,
+            font='Courier New',
+            color='#00FF00',  # Bright green
+            method='caption',
+            size=(clip.w - 60, None),
+            stroke_color='#FF6B00',  # Orange outline
+            stroke_width=2,
+            bg_color='#0a0a0a',  # Nearly black
+            align='center'
+        ).set_duration(duration).set_position(position)
+        
+        return CompositeVideoClip([clip, code_clip])
+    except Exception as e:
+        import logging
+        logging.warning(f"⚠️ Failed to add code overlay: {e}")
+        return clip
+
+
 class VideoEditor:
     """Video editing for YouTube Shorts."""
     
@@ -106,6 +149,17 @@ class VideoEditor:
                 dur = script_data.get('duration_seconds', self.config.video_duration_seconds)
                 seg_len = max(1.0, dur / max(1, len(chunks)))
                 visual_cues = [{'time_seconds': round(i * seg_len, 2), 'duration_seconds': round(seg_len, 2), 'type': 'text', 'content': chunk[:120]} for i, chunk in enumerate(chunks)]
+
+            # Check if this is a coding topic and extract code snippets
+            from scripts.code_utils import is_coding_topic, extract_code_markers
+            is_coding = script_data.get('is_coding_topic', False) or is_coding_topic(script_data.get('topic', ''))
+            code_snippets = []
+            if is_coding:
+                # Try to extract code from visual cues
+                for cue in visual_cues:
+                    cue_content = str(cue.get('content') or cue.get('cue', ''))
+                    extracted = extract_code_markers([cue_content])
+                    code_snippets.extend(extracted)
 
             # Generate image slides for each visual cue and prepare timed clips
             slide_items = []
@@ -224,6 +278,20 @@ class VideoEditor:
                         clips.append(txt_clip)
                     except Exception:
                         pass
+
+            # Add code overlays if this is a coding topic
+            if is_coding and code_snippets:
+                code_display_interval = max(2.0, total_duration / (len(code_snippets) + 1))
+                for idx, code_snippet in enumerate(code_snippets[:3]):  # Max 3 code displays
+                    code_start = 1.0 + (idx * code_display_interval)
+                    if code_start < total_duration - 2.0:
+                        try:
+                            code_clip = add_code_overlay(None, code_snippet, min(3.0, code_display_interval - 0.5), ('center', 'bottom'))
+                            if code_clip:
+                                code_clip = code_clip.set_start(code_start)
+                                clips.append(code_clip)
+                        except Exception as e:
+                            print(f"⚠️ Failed to add code overlay: {e}")
 
             # Build composite timeline using absolute starts
             total_duration = script_data.get('duration_seconds', self.config.video_duration_seconds)

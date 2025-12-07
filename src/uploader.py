@@ -147,30 +147,39 @@ def upload_to_youtube(video_path, title, description, tags, thumbnail_path=None)
 
 def generate_metadata_from_script(script_data: dict, topic: str = None):
     """Generate title, description, tags from script JSON.
-
+    
+    Intelligently includes code only for coding topics.
+    
     - Title: first hook line (max 50 chars)
-    - Description: short summary, topic keywords, and one hashtag
+    - Description: short summary, topic keywords, and hashtags
     - Tags: pulled from `keywords` in script_data
+    - Code: included in description ONLY for coding topics when ALLOW_CODE_IN_DESCRIPTION=true
     """
+    from scripts.code_utils import is_coding_topic, should_display_code_in_description, format_code_for_display
+    
     script = script_data.get('script', '')
-    # Extract first line or sentence (stop at [PAUSE] or newline or period)
+    is_coding = script_data.get('is_coding_topic', False) or is_coding_topic(topic or '')
+    
+    # Extract first line for title
     first = script.split('[PAUSE]')[0].strip()
     first = first.split('\n')[0].strip()
     if '.' in first:
         first = first.split('.')[0].strip()
-
+    
     title = first[:50]
-
+    
     keywords = script_data.get('keywords') or []
     # Normalize keywords to a list
     if isinstance(keywords, str):
         keywords = [k.strip() for k in keywords.split(',') if k.strip()]
-
+    
     # Build tags: priority defaults + extracted keywords (max 30)
-    default_tags = ['Shorts', 'Viral', 'HowTo', 'Tutorial']
+    default_tags = ['Shorts', 'Viral', 'HowTo']
+    if is_coding:
+        default_tags.extend(['Tutorial', 'Programming', 'Coding'])
     if topic:
         default_tags.insert(0, topic.replace(' ', ''))
-
+    
     tags_list = default_tags + [k.replace(' ', '') for k in keywords]
     # Keep unique and limit to 30
     seen = set()
@@ -181,67 +190,66 @@ def generate_metadata_from_script(script_data: dict, topic: str = None):
             seen.add(t.lower())
         if len(dedup_tags) >= 30:
             break
-
+    
     tags = ','.join(dedup_tags)
-
+    
     # Build a set of hashtags (keywords + trending)
     hashtags = []
     for k in keywords[:10]:
         h = '#' + ''.join(e for e in k if e.isalnum())
         if h and h.lower() not in [x.lower() for x in hashtags]:
             hashtags.append(h)
-
-    trending = ['#Shorts', '#Viral', '#FYP', '#ForYou']
+    
+    # Add topic hashtag
     if topic:
         topic_tag = '#' + ''.join(e for e in topic if e.isalnum())
         if topic_tag.lower() not in [x.lower() for x in hashtags]:
             hashtags.insert(0, topic_tag)
-
-    # Merge unique trending hashtags after keywords
+    
+    # Add trending hashtags
+    trending = ['#Shorts', '#Viral', '#FYP', '#ForYou']
     for t in trending:
         if t.lower() not in [x.lower() for x in hashtags]:
             hashtags.append(t)
-
+    
     hashtags_str = ' '.join(hashtags[:20])
-
-    # Build a concise description (include script summary and hashtags)
+    
+    # Build description
     parts = [p.strip() for p in script.split('[PAUSE]') if p.strip()]
+    summary = ''
     if len(parts) > 1:
         summary = parts[1].strip()
     else:
         summary = ' '.join(parts).strip()
-
-    # Truncate summary gracefully
+    
+    # Truncate gracefully
     max_summary = 800
     if len(summary) > max_summary:
         summary = summary[:max_summary].rsplit(' ', 1)[0] + '...'
-
+    
     channel_url = os.getenv('CHANNEL_URL', '')
-
-    # If the script provides a ready-to-paste description, prefer it (but still
-    # append web-trending hashtags if available). Respect code inclusion policy.
-    description = None
-    if isinstance(script_data, dict) and script_data.get('description_for_upload'):
-        description = script_data.get('description_for_upload')
-
-    # If allowed, append short code snippet into description (escaped)
-    allow_code = os.getenv('ALLOW_CODE_IN_DESCRIPTION', 'false').lower() == 'true'
-    code_snippet = script_data.get('code_snippet') if isinstance(script_data, dict) else None
-    if description is None:
+    
+    # Use provided description if available
+    description = script_data.get('description_for_upload')
+    if not description:
         description_lines = [summary]
         if channel_url:
-            description_lines.append(f"🔗 More tutorials: {channel_url}")
-        description_lines.append(hashtags_str)
+            description_lines.append(f"🔗 More: {channel_url}")
         description = "\n\n".join([l for l in description_lines if l])
-
-    if code_snippet and allow_code:
-        # Sanitize snippet to avoid very long blocks
-        cs = str(code_snippet).strip()
-        lines = cs.splitlines()
-        if len(lines) > 12:
-            cs = '\n'.join(lines[:12]) + '\n#...'
-        description = description + "\n\nCode snippet:\n" + cs
-
+    
+    # Add code snippets ONLY for coding topics when enabled
+    if is_coding and should_display_code_in_description(topic or ''):
+        code_snippets = script_data.get('code_snippets', [])
+        if code_snippets:
+            description += "\n\n📝 Code Snippet:\n```\n"
+            for snippet in code_snippets[:2]:
+                cs = str(snippet).strip()
+                cs_formatted = format_code_for_display(cs, max_lines=8)
+                description += cs_formatted + "\n"
+            description += "```"
+    
+    description += "\n\n" + hashtags_str
+    
     return {
         'title': title,
         'description': description,

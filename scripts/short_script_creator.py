@@ -205,37 +205,30 @@ Return only the JSON object. No commentary, no markdown, exact JSON shape reques
             # (e.g., "see code below", "I'll show the code", code blocks, etc.)
             try:
                 import re
+                from scripts.code_utils import sanitize_script_for_topic, is_coding_topic, extract_code_markers
+                
                 script_text = script_data.get('script', '')
+                topic = idea.get('title', '') if isinstance(idea, dict) else ''
+                is_coding = is_coding_topic(topic)
                 
-                # AGGRESSIVE removal: kill any sentence containing code-related keywords
-                code_keywords = [
-                    r'\bcode\b', r'\bsnippet\b', r'\bsee\s+below\b', r'\bI\'ll\s+show\b',
-                    r'\blet\s+me\s+show\b', r'\bdemo\b', r'\bexample\b', r'\bshow\s+the',
-                    r'\bhere\'?s?\s+the', r'\bcheck\s+out', r'\bbelow\b', r'\bdisplay',
-                    r'\bjavascript\b', r'\bpython\b', r'\bjava\b', r'\bc\+\+\b',
-                    r'\bgo\s+lang\b', r'\bruby\b', r'\bphp\b', r'\bcss\b', r'\bhtml\b'
-                ]
-                
-                # Remove fenced code blocks
-                script_text = re.sub(r"```[\s\S]*?```", "", script_text, flags=re.IGNORECASE)
-                
-                # Remove entire sentences that mention code or programming keywords
-                sentences = re.split(r'(?<=[.!?])\s+', script_text)
-                filtered_sentences = []
-                for sent in sentences:
-                    # Check if sentence contains any code-related keyword
-                    has_code_ref = any(re.search(kw, sent, re.IGNORECASE) for kw in code_keywords)
-                    if not has_code_ref and sent.strip():
-                        filtered_sentences.append(sent.strip())
-                
-                script_text = ' '.join(filtered_sentences)
-                # Collapse extra whitespace
-                script_text = ' '.join(script_text.split()).strip()
+                # Apply topic-aware sanitization
+                script_text = sanitize_script_for_topic(script_text, is_coding=is_coding)
                 
                 if script_text:
                     script_data['script'] = script_text
+                
+                # Extract code markers from visual cues (if present)
+                visual_cues = script_data.get('visual_cues', [])
+                if visual_cues:
+                    code_snippets = extract_code_markers(visual_cues)
+                    if code_snippets and is_coding:
+                        script_data['code_snippets'] = code_snippets
+                
+                # Mark topic type for downstream processing
+                script_data['is_coding_topic'] = is_coding
             except Exception as e:
-                # If sanitization fails, use original
+                # If sanitization fails, use original but log warning
+                logger.warning(f"⚠️ Script sanitization failed: {e}, using original")
                 pass
 
             # Required keys
