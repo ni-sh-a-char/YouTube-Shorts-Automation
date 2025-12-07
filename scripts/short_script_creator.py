@@ -3,6 +3,7 @@
 
 import sys
 import json
+import logging
 from typing import Dict, Any, Optional
 
 # Fix UTF-8 encoding for Windows terminals
@@ -16,6 +17,9 @@ if sys.platform == 'win32':
 from src.llm import generate as llm_generate
 from scripts.config import get_config
 from scripts.utils import extract_keywords
+
+# Setup logger
+logger = logging.getLogger(__name__)
 
 
 class ShortScriptCreator:
@@ -53,7 +57,7 @@ class ShortScriptCreator:
             # Use the LLM adapter which supports both Gemini and Groq
             model_name = self.config.groq_model if self.config.llm_provider == 'groq' else self.config.gemini_model
             response = llm_generate(prompt, model=model_name)
-            script_data = self._parse_response(response.text, duration_seconds)
+            script_data = self._parse_response(response.text, duration_seconds, idea)
             return script_data
         except Exception as e:
             print(f"❌ ERROR: Failed to create script for idea '{idea.get('title')}': {e}")
@@ -178,6 +182,7 @@ Return only the JSON object. No commentary, no markdown, exact JSON shape reques
         self,
         response_text: str,
         duration_seconds: int,
+        idea: Dict[str, Any] = None,
     ) -> Dict[str, Any]:
         """
         Parse Gemini response and extract script data.
@@ -185,6 +190,7 @@ Return only the JSON object. No commentary, no markdown, exact JSON shape reques
         Args:
             response_text: Raw response from Gemini
             duration_seconds: Target duration
+            idea: Original idea dictionary (for topic detection)
             
         Returns:
             Parsed script data
@@ -208,7 +214,7 @@ Return only the JSON object. No commentary, no markdown, exact JSON shape reques
                 from scripts.code_utils import sanitize_script_for_topic, is_coding_topic, extract_code_markers
                 
                 script_text = script_data.get('script', '')
-                topic = idea.get('title', '') if isinstance(idea, dict) else ''
+                topic = idea.get('title', '') if (idea and isinstance(idea, dict)) else ''
                 is_coding = is_coding_topic(topic)
                 
                 # Apply topic-aware sanitization
