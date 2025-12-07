@@ -217,11 +217,30 @@ def generate_metadata_from_script(script_data: dict, topic: str = None):
         summary = summary[:max_summary].rsplit(' ', 1)[0] + '...'
 
     channel_url = os.getenv('CHANNEL_URL', '')
-    description_lines = [summary]
-    if channel_url:
-        description_lines.append(f"🔗 More tutorials: {channel_url}")
-    description_lines.append(hashtags_str)
-    description = "\n\n".join([l for l in description_lines if l])
+
+    # If the script provides a ready-to-paste description, prefer it (but still
+    # append web-trending hashtags if available). Respect code inclusion policy.
+    description = None
+    if isinstance(script_data, dict) and script_data.get('description_for_upload'):
+        description = script_data.get('description_for_upload')
+
+    # If allowed, append short code snippet into description (escaped)
+    allow_code = os.getenv('ALLOW_CODE_IN_DESCRIPTION', 'false').lower() == 'true'
+    code_snippet = script_data.get('code_snippet') if isinstance(script_data, dict) else None
+    if description is None:
+        description_lines = [summary]
+        if channel_url:
+            description_lines.append(f"🔗 More tutorials: {channel_url}")
+        description_lines.append(hashtags_str)
+        description = "\n\n".join([l for l in description_lines if l])
+
+    if code_snippet and allow_code:
+        # Sanitize snippet to avoid very long blocks
+        cs = str(code_snippet).strip()
+        lines = cs.splitlines()
+        if len(lines) > 12:
+            cs = '\n'.join(lines[:12]) + '\n#...'
+        description = description + "\n\nCode snippet:\n" + cs
 
     return {
         'title': title,

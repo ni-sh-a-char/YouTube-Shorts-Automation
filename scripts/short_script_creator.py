@@ -120,13 +120,18 @@ class ShortScriptCreator:
                 # Viral-style 30s Short structure prompt. Request explicit [PAUSE] tokens
                 # and per-cue timing. Output must be valid JSON only and follow the
                 # exact schema described.
-                return f"""You are a top-tier short-form creator. Produce a voice-first, 30-second YouTube Short script optimized for attention and pacing.
-Output JSON only. Produce a single JSON object with keys: "script", "duration_seconds", "estimated_word_count", "visual_cues", "keywords", "reading_notes", "difficulty".
+                # IMPORTANT: The model must NOT reference code that isn't present in the
+                # video. Do NOT use phrases like "see code below", "I'll show the code",
+                # or "code sample below" unless the environment variable
+                # `ALLOW_CODE_IN_DESCRIPTION` is set to true. If code cannot be provided,
+                # do not mention it.
+                return f"""You are a top-tier short-form creator and growth marketer. Produce a voice-first, 30-second YouTube Short script optimized for attention, retention, and virality.
+Output JSON only. Produce a single JSON object with keys: "script", "duration_seconds", "estimated_word_count", "visual_cues", "keywords", "reading_notes", "difficulty", "marketing_title", "description_for_upload", "seo_hashtags".
 
 Constraints (follow exactly):
 - Total `duration_seconds`: {duration} (do not change).
 - `script`: Spoken-first narration. Structure it into three beats:
-    1) HOOK (0–3s): One gripping sentence (emotion, surprise or fact). End with [PAUSE].
+    1) HOOK (0–3s): One gripping sentence (emotion, surprise, or fact). End with [PAUSE].
     2) CORE MESSAGE (4–20s): 3–5 short sentences (each 4–10 words). Put [PAUSE] between each sentence.
     3) PAYOFF / CTA (21–30s): 1–2 sentences that transform or call-to-action. End with [PAUSE].
 - Use [PAUSE] tokens to indicate intentional breath/pause points for TTS.
@@ -141,6 +146,14 @@ Reading notes:
 
 Keywords & difficulty:
 - Provide `keywords` array and `difficulty` string ("beginner"/"intermediate").
+
+SEO & marketing fields (important):
+- `marketing_title`: A sticky, curiosity-driven title under 60 characters optimized for click-throughs. Include 1 emoji if helpful.
+- `description_for_upload`: A ready-to-paste YouTube description (max 5000 chars). Include a 1-2 sentence summary, a short CTA, and a list of hashtags (space-separated). If you cannot include code, do NOT mention code in this field.
+- `seo_hashtags`: Provide a short array of 6-12 high-impact hashtags (no spaces in tags) prioritized by relevance.
+
+Safety & code policy:
+- DO NOT include or promise code unless `ALLOW_CODE_IN_DESCRIPTION` is enabled. If enabled, include a very short (<=10 lines) code snippet string under `code_snippet` (escaped) and include it in `description_for_upload`. Otherwise, never refer to code or say it will be shown.
 
 Input Idea:
 Title: {idea.get('title')}
