@@ -206,17 +206,36 @@ Return only the JSON object. No commentary, no markdown, exact JSON shape reques
             try:
                 import re
                 script_text = script_data.get('script', '')
+                
+                # AGGRESSIVE removal: kill any sentence containing code-related keywords
+                code_keywords = [
+                    r'\bcode\b', r'\bsnippet\b', r'\bsee\s+below\b', r'\bI\'ll\s+show\b',
+                    r'\blet\s+me\s+show\b', r'\bdemo\b', r'\bexample\b', r'\bshow\s+the',
+                    r'\bhere\'?s?\s+the', r'\bcheck\s+out', r'\bbelow\b', r'\bdisplay',
+                    r'\bjavascript\b', r'\bpython\b', r'\bjava\b', r'\bc\+\+\b',
+                    r'\bgo\s+lang\b', r'\bruby\b', r'\bphp\b', r'\bcss\b', r'\bhtml\b'
+                ]
+                
                 # Remove fenced code blocks
                 script_text = re.sub(r"```[\s\S]*?```", "", script_text, flags=re.IGNORECASE)
-                # Remove sentences that mention code or 'see below'
-                script_text = re.sub(r"[^.?!]*\b(code|show the code|see the code|see below|I'll show|let me show|demo code|code example)\b[^.?!]*[.?!]?","", script_text, flags=re.IGNORECASE)
-                # Remove inline mentions like "see code" or "below" keeping context
-                script_text = re.sub(r"\bsee\s+(below|the code)\b", "", script_text, flags=re.IGNORECASE)
+                
+                # Remove entire sentences that mention code or programming keywords
+                sentences = re.split(r'(?<=[.!?])\s+', script_text)
+                filtered_sentences = []
+                for sent in sentences:
+                    # Check if sentence contains any code-related keyword
+                    has_code_ref = any(re.search(kw, sent, re.IGNORECASE) for kw in code_keywords)
+                    if not has_code_ref and sent.strip():
+                        filtered_sentences.append(sent.strip())
+                
+                script_text = ' '.join(filtered_sentences)
                 # Collapse extra whitespace
                 script_text = ' '.join(script_text.split()).strip()
+                
                 if script_text:
                     script_data['script'] = script_text
-            except Exception:
+            except Exception as e:
+                # If sanitization fails, use original
                 pass
 
             # Required keys

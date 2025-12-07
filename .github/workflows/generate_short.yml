@@ -51,9 +51,11 @@ jobs:
           TTSMAKER_API_KEY: ${{ secrets.TTSMAKER_API_KEY || '' }}
 
           # === CONTENT CONFIG ===
-          TARGET_TOPIC: ${{ secrets.TARGET_TOPIC || 'Python' }}
-          TOPICS_ROTATION: ${{ secrets.TOPICS_ROTATION || 'Python,VS Code,Git,Docker,Linux' }}
-          CONTENT_NICHE: "tech/coding"
+          # Set TARGET_TOPIC to 'random' to pick from TOPICS_ROTATION
+          # Set to specific topic (e.g., 'Python') to always use that topic
+          TARGET_TOPIC: ${{ secrets.TARGET_TOPIC || 'random' }}
+          TOPICS_ROTATION: ${{ secrets.TOPICS_ROTATION || 'Productivity Hacks,Life Tips,Mental Health,Personal Finance,Fitness Motivation,Learning Tricks,Career Growth,Technology Trends,AI Tools,Remote Work Tips,Cooking Hacks,Travel Tips,Time Management,Study Techniques,Entrepreneurship' }}
+          CONTENT_NICHE: "self-improvement/lifestyle"
 
           # === MODEL / TTS ===
           LLM_PROVIDER: "groq"
