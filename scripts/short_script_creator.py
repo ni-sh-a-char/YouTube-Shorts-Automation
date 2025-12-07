@@ -188,6 +188,24 @@ Return only the JSON object. No commentary, no markdown, exact JSON shape reques
 
             script_data = json.loads(json_str)
 
+            # Post-process script to remove any direct references to code
+            # (e.g., "see code below", "I'll show the code", code blocks, etc.)
+            try:
+                import re
+                script_text = script_data.get('script', '')
+                # Remove fenced code blocks
+                script_text = re.sub(r"```[\s\S]*?```", "", script_text, flags=re.IGNORECASE)
+                # Remove sentences that mention code or 'see below'
+                script_text = re.sub(r"[^.?!]*\b(code|show the code|see the code|see below|I'll show|let me show|demo code|code example)\b[^.?!]*[.?!]?","", script_text, flags=re.IGNORECASE)
+                # Remove inline mentions like "see code" or "below" keeping context
+                script_text = re.sub(r"\bsee\s+(below|the code)\b", "", script_text, flags=re.IGNORECASE)
+                # Collapse extra whitespace
+                script_text = ' '.join(script_text.split()).strip()
+                if script_text:
+                    script_data['script'] = script_text
+            except Exception:
+                pass
+
             # Required keys
             if 'script' not in script_data:
                 raise ValueError("Response missing 'script' key")
@@ -249,6 +267,13 @@ Return only the JSON object. No commentary, no markdown, exact JSON shape reques
             for v in script_data['visual_cues']:
                 if v.get('type') not in allowed:
                     v['type'] = 'image'
+            # Ensure keywords are present; re-extract if missing or empty
+            if not script_data.get('keywords'):
+                try:
+                    from scripts.utils import extract_keywords
+                    script_data['keywords'] = extract_keywords(script_data.get('script', ''))
+                except Exception:
+                    script_data['keywords'] = []
 
             return script_data
         

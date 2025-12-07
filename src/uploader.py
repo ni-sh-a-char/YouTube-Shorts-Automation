@@ -162,24 +162,71 @@ def generate_metadata_from_script(script_data: dict, topic: str = None):
     title = first[:50]
 
     keywords = script_data.get('keywords') or []
-    tags = ','.join(keywords)
+    # Normalize keywords to a list
+    if isinstance(keywords, str):
+        keywords = [k.strip() for k in keywords.split(',') if k.strip()]
 
-    summary = ''
-    # Build a brief summary from the core message (try to find after first [PAUSE])
+    # Build tags: priority defaults + extracted keywords (max 30)
+    default_tags = ['Shorts', 'Viral', 'HowTo', 'Tutorial']
+    if topic:
+        default_tags.insert(0, topic.replace(' ', ''))
+
+    tags_list = default_tags + [k.replace(' ', '') for k in keywords]
+    # Keep unique and limit to 30
+    seen = set()
+    dedup_tags = []
+    for t in tags_list:
+        if t and t.lower() not in seen:
+            dedup_tags.append(t)
+            seen.add(t.lower())
+        if len(dedup_tags) >= 30:
+            break
+
+    tags = ','.join(dedup_tags)
+
+    # Build a set of hashtags (keywords + trending)
+    hashtags = []
+    for k in keywords[:10]:
+        h = '#' + ''.join(e for e in k if e.isalnum())
+        if h and h.lower() not in [x.lower() for x in hashtags]:
+            hashtags.append(h)
+
+    trending = ['#Shorts', '#Viral', '#FYP', '#ForYou']
+    if topic:
+        topic_tag = '#' + ''.join(e for e in topic if e.isalnum())
+        if topic_tag.lower() not in [x.lower() for x in hashtags]:
+            hashtags.insert(0, topic_tag)
+
+    # Merge unique trending hashtags after keywords
+    for t in trending:
+        if t.lower() not in [x.lower() for x in hashtags]:
+            hashtags.append(t)
+
+    hashtags_str = ' '.join(hashtags[:20])
+
+    # Build a concise description (include script summary and hashtags)
     parts = [p.strip() for p in script.split('[PAUSE]') if p.strip()]
     if len(parts) > 1:
-        summary = parts[1][:200]
+        summary = parts[1].strip()
     else:
-        summary = ' '.join(parts)[:200]
+        summary = ' '.join(parts).strip()
 
-    hashtag = f"#{keywords[0].replace(' ', '')}" if keywords else (f"#{topic.replace(' ','')}" if topic else '')
+    # Truncate summary gracefully
+    max_summary = 800
+    if len(summary) > max_summary:
+        summary = summary[:max_summary].rsplit(' ', 1)[0] + '...'
 
-    description = f"{summary}\n\nKeywords: {', '.join(keywords)}\n{hashtag}"
+    channel_url = os.getenv('CHANNEL_URL', '')
+    description_lines = [summary]
+    if channel_url:
+        description_lines.append(f"🔗 More tutorials: {channel_url}")
+    description_lines.append(hashtags_str)
+    description = "\n\n".join([l for l in description_lines if l])
 
     return {
         'title': title,
         'description': description,
         'tags': tags,
-        'hashtag': hashtag
+        'hashtags': hashtags_str
     }
 

@@ -172,9 +172,21 @@ def generate_shorts_video():
         setup_logging()
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        topic = os.getenv('TARGET_TOPIC', 'python programming')
+        # Select topic: respect explicit TARGET_TOPIC unless it's set to 'random' or 'rotate'
+        env_topic = os.getenv('TARGET_TOPIC', '').strip()
+        if env_topic and env_topic.lower() not in ('', 'random', 'rotate'):
+            topic = env_topic
+        else:
+            # Use topics rotation from config if available, otherwise fall back to target_topic
+            try:
+                topics = config.topics_rotation if config.topics_rotation else [config.target_topic]
+            except Exception:
+                topics = [config.target_topic]
+            import random
+            topic = random.choice(topics).strip()
+
         duration = config.video_duration_seconds
-        
+
         logger.info(f"📋 Topic: {topic}")
         logger.info(f"⏱️  Duration: {duration} seconds")
         logger.info(f"🕐 Timestamp: {timestamp}")
@@ -328,14 +340,19 @@ def generate_shorts_video():
             pass
         
         # Upload helper lives in src.uploader
-        from src.uploader import upload_to_youtube
-        
-        video_metadata = {
-            'title': idea.get('title', 'Amazing Tech Tip'),
-            'description': f"{idea.get('description', '')}\n\n#Shorts #Coding #Tutorial",
-            'tags': ['Shorts', 'Coding', 'Python', 'Tutorial', topic],
-            'categoryId': '22'  # Education category
-        }
+        from src.uploader import upload_to_youtube, generate_metadata_from_script
+
+        # Generate richer metadata (title, description, tags, hashtags)
+        try:
+            meta = generate_metadata_from_script(script_result if isinstance(script_result, dict) else {'script': script}, topic=topic)
+            video_title = meta.get('title') or idea.get('title', 'Amazing Tip')
+            video_description = meta.get('description') or idea.get('description', '')
+            video_tags = meta.get('tags') or ''
+        except Exception as e:
+            # Fallback to simple metadata
+            video_title = idea.get('title', 'Amazing Tech Tip')
+            video_description = f"{idea.get('description', '')}\n\n#Shorts"
+            video_tags = ','.join(['Shorts', 'Tutorial', topic.replace(' ', '')])
         
         # Retry upload a few times to handle transient network/auth errors
         upload_attempts = int(os.getenv('UPLOAD_RETRIES', '3'))
@@ -347,9 +364,9 @@ def generate_shorts_video():
                 logger.info(f"⬆️  Upload attempt {attempt}/{upload_attempts}...")
                 video_id = upload_to_youtube(
                     video_path=video_path,
-                    title=video_metadata.get('title', ''),
-                    description=video_metadata.get('description', ''),
-                    tags=','.join(video_metadata.get('tags', [])),
+                    title=video_title,
+                    description=video_description,
+                    tags=video_tags,
                     thumbnail_path=thumbnail_path
                 )
                 if not video_id:
